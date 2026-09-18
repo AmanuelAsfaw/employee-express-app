@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Akiya Emp",
-    "slug": "akiya-employee",
+    "slug": "akiya-emp",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/akiya-icon.png",
@@ -17,24 +17,25 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/akiya-icon.png",
+        "foregroundImage": "./assets/akiya-splash-screen..png",
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.amanuelasfaw.akiyaemployee"
+      "permissions": [
+        "android.permission.CAMERA"
+      ],
+      "package": "com.amanuelasfaw.akiyaexpress"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      "expo-sqlite"
+    ],
     "extra": {
       "eas": {
-        "projectId": "ab57897e-4b10-433b-848b-595d67b62112"
+        "projectId": "50a9664c-cc8a-47f3-af1c-1005a089280f"
       }
-    },
-    "plugins": [
-      "expo-status-bar",
-      "expo-sharing",
-      "expo-font"
-    ]
+    }
   }
 }
