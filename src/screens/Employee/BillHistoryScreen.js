@@ -8,7 +8,6 @@ import {
   StyleSheet,
   ActivityIndicator,
   FlatList,
-  Alert,
   Modal,
   Pressable,
   RefreshControl,
@@ -31,19 +30,54 @@ import {
 } from '../../utils/employe_api_utils';
 import { theme } from '../../theme/theme';
 import DateInput from '../../components/DateInput';
+import CustomCommissionPrint from '../../components/bills/CustomCommissionPrint';
+import { Ionicons } from '@expo/vector-icons';
+import { Alert } from '../../components/Alert';
 
 // If you already export this from another mobile file,
 // import it from there instead.
-const status_list = [
+const STATUS_LIST = [
   'CREATED',
   'IN_TRANSIT',
   'ARRIVED',
   'DELIVERED',
   'RETURNED',
-];
+]
 
-const EmployeeBillsScreen = () => {
-  const navigation = useNavigation();
+const STATUS_LABELS = {
+  CREATED: 'Created',
+  IN_TRANSIT: 'In Transit',
+  ARRIVED: 'Arrived',
+  DELIVERED: 'Delivered',
+  RETURNED: 'Returned',
+}
+
+const STATUS_COLORS = {
+  CREATED: {
+    color: '#A7B0C0',
+    background: 'rgba(167,176,192,0.12)',
+  },
+  IN_TRANSIT: {
+    color: theme.colors.warning,
+    background: 'rgba(217,119,6,0.14)',
+  },
+  ARRIVED: {
+    color: theme.colors.info,
+    background: 'rgba(8,145,178,0.14)',
+  },
+  DELIVERED: {
+    color: theme.colors.success,
+    background: 'rgba(22,163,74,0.14)',
+  },
+  RETURNED: {
+    color: theme.colors.danger,
+    background: 'rgba(231,76,60,0.14)',
+  },
+}
+
+
+const EmployeeBillsScreen = ({navigation}) => {
+  // const navigation = useNavigation();
 
   // ============================================================
   // DATA
@@ -55,6 +89,9 @@ const EmployeeBillsScreen = () => {
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [statusModalVisible, setStatusModalVisible] = useState(false)
+  const [selectedStatusBill, setSelectedStatusBill] = useState(null)
+  const [updatingBillId, setUpdatingBillId] = useState(null)
 
   // ============================================================
   // NETWORK
@@ -80,7 +117,8 @@ const EmployeeBillsScreen = () => {
   // SELECTION
   // ============================================================
 
-  const [selectedBills, setSelectedBills] = useState([]);
+  // const [selectedBills, setSelectedBills] = useState([]);
+  const [selectedBillIds, setSelectedBillIds] = useState([]);
   const [selectAll, setSelectAll] = useState(false);
 
   // ============================================================
@@ -94,8 +132,9 @@ const EmployeeBillsScreen = () => {
   // MODALS
   // ============================================================
 
-  const [selectedBillsModalVisible, setSelectedBillsModalVisible] =
-    useState(false);
+  const [selectedBillsModalVisible, setSelectedBillsModalVisible] = useState(false);
+  const [customCommissionVisible, setCustomCommissionVisible] = useState(false);
+
 
   const [qrModalVisible, setQrModalVisible] = useState(false);
   const [trackingNo, setTrackingNo] = useState('');
@@ -199,7 +238,7 @@ const EmployeeBillsScreen = () => {
     loadBills();
   }, [
     isConnected,
-    search,
+    // search,
     statusFilter,
     startDate,
     endDate,
@@ -229,6 +268,15 @@ const EmployeeBillsScreen = () => {
       )
     );
   }, [bills, destinyFilter]);
+
+  const selectedBills = useMemo(() => {
+    return filteredBills.filter((bill) =>
+      selectedBillIds.includes(
+        String(bill?.id ?? bill?.uuid)
+      )
+    );
+  }, [filteredBills, selectedBillIds]);
+
 
   // ============================================================
   // STATUS COLOR
@@ -262,38 +310,53 @@ const EmployeeBillsScreen = () => {
   // ============================================================
 
   const toggleBillSelection = (bill) => {
-    setSelectedBills((previous) => {
-      const exists = previous.some(
-        (item) => item?.id === bill?.id
-      );
+    const billId = String(bill?.id ?? bill?.uuid);
+
+    setSelectedBillIds((previous) => {
+      const exists = previous.includes(billId);
 
       const next = exists
-        ? previous.filter(
-            (item) => item?.id !== bill?.id
-          )
-        : [...previous, bill];
+        ? previous.filter((id) => id !== billId)
+        : [...previous, billId];
 
       setSelectAll(
         filteredBills.length > 0 &&
-          next.length === filteredBills.length
+          filteredBills.every((item) =>
+            next.includes(
+              String(item?.id ?? item?.uuid)
+            )
+          )
       );
 
       return next;
     });
   };
 
+
   const toggleSelectAll = () => {
     if (
-      selectedBills.length === filteredBills.length &&
-      filteredBills.length > 0
+      filteredBills.length > 0 &&
+      filteredBills.every((bill) =>
+        selectedBillIds.includes(
+          String(bill?.id ?? bill?.uuid)
+        )
+      )
     ) {
-      setSelectedBills([]);
+      setSelectedBillIds([]);
       setSelectAll(false);
-    } else {
-      setSelectedBills(filteredBills);
-      setSelectAll(true);
+      return;
     }
+
+    const ids = filteredBills
+      .map((bill) =>
+        String(bill?.id ?? bill?.uuid)
+      )
+      .filter(Boolean);
+
+    setSelectedBillIds(ids);
+    setSelectAll(ids.length > 0);
   };
+
 
   // ============================================================
   // DESTINY FILTER
@@ -319,63 +382,83 @@ const EmployeeBillsScreen = () => {
   // UPDATE STATUS
   // ============================================================
 
-  const updateBillStatus = async (id, status) => {
+  const updateBillStatus = async (bill, status) => {
+    if (!bill?.id || updatingBillId === bill.id) {
+      return
+    }
+
     if (!isConnected) {
       Alert.alert(
         'Offline',
         'You must be online to update bill status.'
-      );
-      return;
+      )
+      return
     }
 
     try {
+      setUpdatingBillId(bill.id)
+      setStatusModalVisible(false)
+
       const data = {
         status,
         from_type: 'sender',
-      };
+      }
 
-      const response =
-        await updateReceivedBillByEmployeeAPI(
-          id,
-          data,
-          'sender'
-        );
+      const response = await updateReceivedBillByEmployeeAPI(
+        bill.id,
+        data,
+        'sender'
+      )
 
       if (
         response?.status === 200 ||
         response?.status === 201
       ) {
+        // Update card immediately.
+        setBills((previousBills) =>
+          previousBills.map((item) =>
+            item.id === bill.id
+              ? {
+                  ...item,
+                  status,
+                }
+              : item
+          )
+        )
+
+        // Refresh summary.
+        await loadBills(false)
+
         Alert.alert(
           'Success',
-          `${
-            response?.data?.tracking_no || ''
-          } status updated to ${status.replace(
-            '_',
-            ' '
-          )}`
-        );
-
-        loadBills(false);
+          `${bill.tracking_no || getTracking(bill)} status updated to ${
+            STATUS_LABELS[status]
+          }`
+        )
       } else {
         Alert.alert(
           'Error',
           response?.data?.message ||
             'Status update failed.'
-        );
+        )
       }
     } catch (error) {
       console.error(
         'Failed to update bill status:',
         error
-      );
+      )
 
       Alert.alert(
         'Error',
         error?.response?.data?.message ||
           'Status update failed.'
-      );
+      )
+    } finally {
+      setUpdatingBillId(null)
+      setSelectedStatusBill(null)
     }
-  };
+  }
+
 
   // ============================================================
   // STATUS PICKER
@@ -386,29 +469,14 @@ const EmployeeBillsScreen = () => {
       Alert.alert(
         'Offline',
         'You must be online to update bill status.'
-      );
-      return;
+      )
+      return
     }
 
-    Alert.alert(
-      'Update Status',
-      getTracking(bill),
-      [
-        ...status_list.map((status) => ({
-          text: status.replace('_', ' '),
-          onPress: () =>
-            updateBillStatus(
-              bill.id,
-              status
-            ),
-        })),
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-      ]
-    );
-  };
+    setSelectedStatusBill(bill)
+    setStatusModalVisible(true)
+  }
+
 
   // ============================================================
   // OPEN BILL
@@ -429,7 +497,7 @@ const EmployeeBillsScreen = () => {
   const printBill = (bill) => {
     const tracking = getTracking(bill);
 
-    navigation.navigate('BillPrint', {
+    navigation.navigate('DetailBill', {
       trackingNo: tracking,
       bill,
     });
@@ -442,7 +510,7 @@ const EmployeeBillsScreen = () => {
   const fingerprintPrint = (bill) => {
     const tracking = getTracking(bill);
 
-    navigation.navigate('BillFingerprintPrint', {
+    navigation.navigate('DetailBill', {
       trackingNo: tracking,
       bill,
     });
@@ -520,8 +588,9 @@ const EmployeeBillsScreen = () => {
             `Messages processed for ${billIds.length} selected bill(s).`
         );
 
-        setSelectedBills([]);
+        setSelectedBillIds([]);
         setSelectAll(false);
+
       } else {
         Alert.alert(
           'Messages',
@@ -572,189 +641,354 @@ const EmployeeBillsScreen = () => {
   // BILL CARD
   // ============================================================
 
-  const renderBillItem = ({
-    item,
-  }) => {
-    const tracking = getTracking(item);
+  const renderBillItem = ({ item }) => {
+  const tracking = getTracking(item);
 
-    const isSelected = selectedBills.some(
-      (bill) => bill?.id === item?.id
-    );
+  const isSelected = selectedBillIds.includes(
+    String(item?.id ?? item?.uuid)
+  );
 
-    const sender = isConnected
-      ? item?.sender_name
-      : item?.sender?.name;
+  const sender = isConnected
+    ? item?.sender_name
+    : item?.sender?.name;
 
-    const consignee = isConnected
-      ? item?.consignee_name
-      : item?.consignee?.name;
+  const consignee = isConnected
+    ? item?.consignee_name
+    : item?.consignee?.name;
 
-    return (
+  const statusStyle =
+    STATUS_COLORS[item?.status] || STATUS_COLORS.CREATED;
+
+  const statusLabel =
+    STATUS_LABELS[item?.status] ||
+    item?.status ||
+    'Created';
+
+  const amount = Number(
+    item?.amount_received || 0
+  ).toFixed(2);
+
+  const createdDate = item?.created_at
+    ? format(
+        new Date(item.created_at),
+        'MMM dd, yyyy'
+      )
+    : '-';
+
+  return (
+    <View
+      style={[
+        styles.billCard,
+        isSelected && styles.selectedBillCard,
+      ]}
+    >
+      {/* TOP ACCENT */}
       <View
         style={[
-          styles.billCard,
-          isSelected && styles.selectedBillCard,
+          styles.cardAccent,
+          {
+            backgroundColor: statusStyle.color,
+          },
         ]}
-      >
-        {/* CARD HEADER */}
-        <View style={styles.cardHeader}>
-          <View style={styles.trackingContainer}>
-            <TouchableOpacity
-              style={[
-                styles.checkbox,
-                isSelected &&
-                  styles.checkboxSelected,
-              ]}
-              onPress={() =>
-                toggleBillSelection(item)
-              }
-            >
-              {isSelected && (
-                <Text style={styles.checkMark}>
-                  ✓
-                </Text>
-              )}
-            </TouchableOpacity>
+      />
 
-            <TouchableOpacity
-              onPress={() => openBill(item)}
-            >
-              <Text style={styles.trackingNo}>
-                {tracking}
-              </Text>
-            </TouchableOpacity>
-          </View>
+      {/* HEADER */}
+      <View style={styles.modernCardHeader}>
+        <View style={styles.trackingSection}>
+          <TouchableOpacity
+            activeOpacity={0.7}
+            style={[
+              styles.modernCheckbox,
+              isSelected && styles.modernCheckboxSelected,
+            ]}
+            onPress={() => toggleBillSelection(item)}
+          >
+            {isSelected && (
+              <Ionicons
+                name="checkmark"
+                size={14}
+                color="#fff"
+              />
+            )}
+          </TouchableOpacity>
 
           <TouchableOpacity
+            activeOpacity={0.7}
+            onPress={() => openBill(item)}
+            style={styles.trackingInfo}
+          >
+            <Text style={styles.trackingCaption}>
+              TRACKING NUMBER
+            </Text>
+
+            <Text
+              style={styles.modernTrackingNo}
+              numberOfLines={1}
+            >
+              {tracking}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={0.75}
+          disabled={updatingBillId === item.id}
+          style={[
+            styles.modernStatusBadge,
+            {
+              backgroundColor: statusStyle.background,
+              borderColor: `${statusStyle.color}35`,
+            },
+          ]}
+          onPress={() => openStatusPicker(item)}
+        >
+          {updatingBillId === item.id ? (
+            <ActivityIndicator
+              size="small"
+              color={statusStyle.color}
+            />
+          ) : (
+            <>
+              <View
+                style={[
+                  styles.modernStatusDot,
+                  {
+                    backgroundColor: statusStyle.color,
+                  },
+                ]}
+              />
+
+              <Text
+                style={[
+                  styles.modernStatusText,
+                  {
+                    color: statusStyle.color,
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {statusLabel}
+              </Text>
+
+              <Ionicons
+                name="chevron-down"
+                size={12}
+                color={statusStyle.color}
+              />
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* ROUTE */}
+      <View style={styles.routeSection}>
+        <View style={styles.routeTimeline}>
+          <View
             style={[
-              styles.statusBadge,
+              styles.routeDot,
               {
                 backgroundColor:
-                  getStatusColor(item.status),
+                  theme.colors.primary,
               },
             ]}
-            onPress={() =>
-              openStatusPicker(item)
-            }
-          >
-            <Text style={styles.statusText}>
-              {item?.status?.replace('_', ' ')}
-            </Text>
-          </TouchableOpacity>
+          />
+
+          <View style={styles.routeLine} />
+
+          <View
+            style={[
+              styles.routeDot,
+              {
+                backgroundColor:
+                  statusStyle.color,
+              },
+            ]}
+          />
         </View>
 
-        {/* BODY */}
-        <View style={styles.cardBody}>
-          <View style={styles.infoRow}>
-            <Text style={styles.cardLabel}>
-              Sender
-            </Text>
-            <Text
-              style={styles.cardValue}
-              numberOfLines={1}
-            >
-              {sender || '-'}
-            </Text>
+        <View style={styles.routeContent}>
+          {/* SENDER */}
+          <View style={styles.routeRow}>
+            <View style={styles.routeTextContainer}>
+              <Text style={styles.routeLabel}>
+                SENDER
+              </Text>
+
+              <Text
+                style={styles.routeName}
+                numberOfLines={1}
+              >
+                {sender || '-'}
+              </Text>
+            </View>
+
+            <Ionicons
+              name="person-outline"
+              size={17}
+              color={theme.colors.textMuted}
+            />
           </View>
 
-          <View style={styles.infoRow}>
-            <Text style={styles.cardLabel}>
-              Consignee
-            </Text>
-            <Text
-              style={styles.cardValue}
-              numberOfLines={1}
-            >
-              {consignee || '-'}
-            </Text>
+          {/* DESTINATION */}
+          <View style={styles.destinationRow}>
+            <View style={styles.destinationBadge}>
+              <Ionicons
+                name="location-outline"
+                size={13}
+                color={theme.colors.primary}
+              />
+
+              <Text
+                style={styles.destinationText}
+                numberOfLines={1}
+              >
+                {item?.destiny_branch?.name ||
+                  'Destination'}
+              </Text>
+            </View>
           </View>
 
-          <View style={styles.infoRow}>
-            <Text style={styles.cardLabel}>
-              Destiny
-            </Text>
-            <Text
-              style={styles.cardValue}
-              numberOfLines={1}
-            >
-              {item?.destiny_branch?.name || '-'}
-            </Text>
+          {/* CONSIGNEE */}
+          <View style={styles.routeRow}>
+            <View style={styles.routeTextContainer}>
+              <Text style={styles.routeLabel}>
+                CONSIGNEE
+              </Text>
+
+              <Text
+                style={styles.routeName}
+                numberOfLines={1}
+              >
+                {consignee || '-'}
+              </Text>
+            </View>
+
+            <Ionicons
+              name="person-outline"
+              size={17}
+              color={theme.colors.textMuted}
+            />
           </View>
-
-          <View style={styles.cardFooter}>
-            <Text style={styles.amount}>
-              ETB{' '}
-              {Number(
-                item?.amount_received || 0
-              ).toFixed(2)}
-            </Text>
-
-            <Text style={styles.date}>
-              {item?.created_at
-                ? format(
-                    new Date(item.created_at),
-                    'MMM dd, yyyy'
-                  )
-                : '-'}
-            </Text>
-          </View>
-        </View>
-
-        {/* ACTIONS */}
-        <View style={styles.actionRow}>
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => printBill(item)}
-          >
-            <Text style={styles.actionIcon}>
-              🖨
-            </Text>
-            <Text style={styles.actionText}>
-              Print
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() =>
-              fingerprintPrint(item)
-            }
-          >
-            <Text style={styles.actionIcon}>
-              ☝
-            </Text>
-            <Text style={styles.actionText}>
-              Fingerprint
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => showQrCode(item)}
-          >
-            <Text style={styles.actionIcon}>
-              ▣
-            </Text>
-            <Text style={styles.actionText}>
-              QR
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => openBill(item)}
-          >
-            <Text style={styles.actionIcon}>
-              👁
-            </Text>
-            <Text style={styles.actionText}>
-              View
-            </Text>
-          </TouchableOpacity>
         </View>
       </View>
-    );
-  };
+
+      {/* FINANCIAL INFO */}
+      <View style={styles.financialSection}>
+        <View>
+          <Text style={styles.amountLabel}>
+            AMOUNT RECEIVED
+          </Text>
+
+          <Text style={styles.modernAmount}>
+            ETB {amount}
+          </Text>
+        </View>
+
+        <View style={styles.dateContainer}>
+          <View style={styles.dateIconContainer}>
+            <Ionicons
+              name="calendar-outline"
+              size={15}
+              color={theme.colors.textSecondary}
+            />
+          </View>
+
+          <View>
+            <Text style={styles.amountLabel}>
+              CREATED
+            </Text>
+
+            <Text style={styles.modernDate}>
+              {createdDate}
+            </Text>
+          </View>
+        </View>
+      </View>
+
+      {/* ACTION BAR */}
+      <View style={styles.modernActionRow}>
+        <TouchableOpacity
+          activeOpacity={0.7}
+          style={styles.modernActionButton}
+          onPress={() => printBill(item)}
+        >
+          <Ionicons
+            name="print-outline"
+            size={18}
+            color={theme.colors.textSecondary}
+          />
+
+          <Text style={styles.modernActionText}>
+            Print
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.actionDivider} />
+
+        <TouchableOpacity
+          activeOpacity={0.7}
+          style={styles.modernActionButton}
+          onPress={() => fingerprintPrint(item)}
+        >
+          <Ionicons
+            name="finger-print-outline"
+            size={18}
+            color={theme.colors.textSecondary}
+          />
+
+          <Text style={styles.modernActionText}>
+            Fingerprint
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.actionDivider} />
+
+        <TouchableOpacity
+          activeOpacity={0.7}
+          style={styles.modernActionButton}
+          onPress={() => showQrCode(item)}
+        >
+          <Ionicons
+            name="qr-code-outline"
+            size={18}
+            color={theme.colors.textSecondary}
+          />
+
+          <Text style={styles.modernActionText}>
+            QR
+          </Text>
+        </TouchableOpacity>
+
+        <View style={styles.actionDivider} />
+
+        <TouchableOpacity
+          activeOpacity={0.7}
+          style={styles.modernActionButton}
+          onPress={() => openBill(item)}
+        >
+          <Ionicons
+            name="eye-outline"
+            size={18}
+            color={theme.colors.primary}
+          />
+
+          <Text
+            style={[
+              styles.modernActionText,
+              {
+                color: theme.colors.primary,
+              },
+            ]}
+          >
+            View
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+};
+
+
 
   // ============================================================
   // HEADER
@@ -910,6 +1144,9 @@ const EmployeeBillsScreen = () => {
           placeholderTextColor="#999"
           value={search}
           onChangeText={setSearch}
+          onSubmitEditing={()=>{
+            loadBills(true)
+          }}
         />
 
         {/* DATE FILTERS */}
@@ -946,45 +1183,38 @@ const EmployeeBillsScreen = () => {
           Status
         </Text>
 
-        <View style={styles.pickerWrapper}>
-          <Picker
-            selectedValue={statusFilter}
-            onValueChange={(value) =>
-              setStatusFilter(value)
-            }
-            style={styles.picker}
-          >
-            <Picker.Item
-              label="All Status"
-              value=""
+        <TouchableOpacity
+          activeOpacity={0.8}
+          style={styles.statusFilterButton}
+          onPress={() => {
+            setSelectedStatusBill(null)
+            setStatusModalVisible(true)
+          }}
+        >
+          <View style={styles.statusFilterLeft}>
+            <Ionicons
+              name="funnel-outline"
+              size={18}
+              color={theme.colors.primary}
             />
 
-            <Picker.Item
-              label="Created"
-              value="CREATED"
-            />
+            <Text
+              style={styles.statusFilterText}
+              numberOfLines={1}
+            >
+              {statusFilter
+                ? STATUS_LABELS[statusFilter]
+                : 'All Status'}
+            </Text>
+          </View>
 
-            <Picker.Item
-              label="In Transit"
-              value="IN_TRANSIT"
-            />
+          <Ionicons
+            name="chevron-down"
+            size={17}
+            color={theme.colors.textSecondary}
+          />
+        </TouchableOpacity>
 
-            <Picker.Item
-              label="Arrived"
-              value="ARRIVED"
-            />
-
-            <Picker.Item
-              label="Delivered"
-              value="DELIVERED"
-            />
-
-            <Picker.Item
-              label="Returned"
-              value="RETURNED"
-            />
-          </Picker>
-        </View>
 
         {/* DESTINY */}
         <Text style={styles.filterLabel}>
@@ -1055,12 +1285,23 @@ const EmployeeBillsScreen = () => {
               styles.bulkButton,
               styles.printButton,
             ]}
-            onPress={openSelectedBillsPrint}
+            onPress={() => {
+              if (!selectedBills.length) {
+                Alert.alert(
+                  'Print',
+                  'Please select at least one bill.'
+                );
+                return;
+              }
+
+              setCustomCommissionVisible(true);
+            }}
           >
             <Text style={styles.bulkButtonText}>
               🖨 Customs Commission Print
             </Text>
           </TouchableOpacity>
+
 
           <View style={styles.smsRow}>
             <TouchableOpacity
@@ -1145,6 +1386,7 @@ const EmployeeBillsScreen = () => {
     <View style={styles.container}>
       <FlatList
         data={filteredBills}
+        extraData={selectedBillIds}
         keyExtractor={(item, index) =>
           item?.id
             ? item.id.toString()
@@ -1152,9 +1394,7 @@ const EmployeeBillsScreen = () => {
         }
         renderItem={renderBillItem}
         ListHeaderComponent={<ListHeader />}
-        contentContainerStyle={
-          styles.listContent
-        }
+        contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -1170,24 +1410,20 @@ const EmployeeBillsScreen = () => {
             />
           ) : (
             <View style={styles.emptyContainer}>
-              <Text style={styles.emptyIcon}>
-                📦
-              </Text>
+              <Text style={styles.emptyIcon}>📦</Text>
 
               <Text style={styles.emptyText}>
                 No bills found
               </Text>
 
-              <Text
-                style={styles.emptySubText}
-              >
-                Try changing your filters or
-                date range.
+              <Text style={styles.emptySubText}>
+                Try changing your filters or date range.
               </Text>
             </View>
           )
         }
       />
+
 
       {/* NEW BILL */}
       <TouchableOpacity
@@ -1454,6 +1690,191 @@ const EmployeeBillsScreen = () => {
           </View>
         </View>
       </Modal>
+
+      {/* CUSTOMS COMMISSION PRINT */}
+
+      <Modal
+        visible={customCommissionVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() =>
+          setCustomCommissionVisible(false)
+        }
+      >
+        <CustomCommissionPrint
+          // visible={customCommissionVisible}
+          // onClose={() => setCustomCommissionVisible(false)}
+          loading={false}
+          error={null}
+          bills={selectedBills}
+          company={companyData}
+          dayInput={format(new Date(), 'dd/MM/yyyy')}
+        />
+
+      </Modal>
+
+      <Modal
+        visible={statusModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() =>
+          setStatusModalVisible(false)
+        }
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.statusBottomSheet}>
+            <View style={styles.modalHandle} />
+
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>
+                  {selectedStatusBill
+                    ? 'Update Status'
+                    : 'Filter by Status'}
+                </Text>
+
+                {selectedStatusBill && (
+                  <Text style={styles.modalSubtitle}>
+                    {getTracking(selectedStatusBill)}
+                  </Text>
+                )}
+              </View>
+
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() =>
+                  setStatusModalVisible(false)
+                }
+              >
+                <Ionicons
+                  name="close"
+                  size={21}
+                  color={theme.colors.text}
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* ALL STATUS - FILTER ONLY */}
+            {!selectedStatusBill && (
+              <TouchableOpacity
+                style={[
+                  styles.statusOption,
+                  !statusFilter &&
+                    styles.statusOptionSelected,
+                ]}
+                onPress={() => {
+                  setStatusFilter('')
+                  setStatusModalVisible(false)
+                }}
+              >
+                <View
+                  style={[
+                    styles.statusOptionIcon,
+                    {
+                      backgroundColor:
+                        'rgba(0,216,255,0.10)',
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name="apps-outline"
+                    size={19}
+                    color={theme.colors.primary}
+                  />
+                </View>
+
+                <Text style={styles.statusOptionText}>
+                  All Status
+                </Text>
+
+                {!statusFilter && (
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={21}
+                    color={theme.colors.primary}
+                  />
+                )}
+              </TouchableOpacity>
+            )}
+
+            {STATUS_LIST.map((status) => {
+              const statusStyle =
+                STATUS_COLORS[status]
+
+              const isSelected =
+                selectedStatusBill
+                  ? selectedStatusBill.status === status
+                  : statusFilter === status
+
+              return (
+                <TouchableOpacity
+                  key={status}
+                  activeOpacity={0.75}
+                  style={[
+                    styles.statusOption,
+                    isSelected &&
+                      styles.statusOptionSelected,
+                  ]}
+                  onPress={() => {
+                    if (selectedStatusBill) {
+                      updateBillStatus(
+                        selectedStatusBill,
+                        status
+                      )
+                    } else {
+                      setStatusFilter(status)
+                      setStatusModalVisible(false)
+                    }
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.statusOptionIcon,
+                      {
+                        backgroundColor:
+                          statusStyle.background,
+                      },
+                    ]}
+                  >
+                    <View
+                      style={[
+                        styles.largeStatusDot,
+                        {
+                          backgroundColor:
+                            statusStyle.color,
+                        },
+                      ]}
+                    />
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.statusOptionText,
+                      {
+                        color: isSelected
+                          ? statusStyle.color
+                          : theme.colors.text,
+                      },
+                    ]}
+                  >
+                    {STATUS_LABELS[status]}
+                  </Text>
+
+                  {isSelected && (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={21}
+                      color={statusStyle.color}
+                    />
+                  )}
+                </TouchableOpacity>
+              )
+            })}
+          </View>
+        </View>
+      </Modal>
+
+
     </View>
   );
 };
@@ -1779,6 +2200,8 @@ const styles = StyleSheet.create({
       width: 0,
       height: 2,
     },
+    borderWidth: .5,
+    borderColor: theme.colors.border,
   },
 
   selectedBillCard: {
@@ -2103,6 +2526,441 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textAlign: 'center',
   },
+  statusFilterButton: {
+  height: 46,
+  borderRadius: theme.radius.md,
+  backgroundColor: theme.colors.surfaceSecondary,
+  borderWidth: 1,
+  borderColor: theme.colors.border,
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+  paddingHorizontal: 13,
+  marginBottom: theme.spacing.md,
+},
+
+statusFilterLeft: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  flex: 1,
+},
+
+statusFilterText: {
+  color: theme.colors.text,
+  fontSize: 13,
+  fontWeight: '600',
+  marginLeft: 9,
+},
+
+statusBadge: {
+  minHeight: 31,
+  maxWidth: 130,
+  borderRadius: theme.radius.round,
+  borderWidth: 1,
+  paddingHorizontal: 9,
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 5,
+},
+
+statusDot: {
+  width: 7,
+  height: 7,
+  borderRadius: 4,
+},
+
+statusText: {
+  fontSize: 10,
+  fontWeight: '700',
+  flexShrink: 1,
+},
+
+statusBottomSheet: {
+  backgroundColor: theme.colors.surface,
+  borderTopLeftRadius: 24,
+  borderTopRightRadius: 24,
+  paddingHorizontal: 20,
+  paddingTop: 10,
+  paddingBottom: 25,
+  borderTopWidth: 1,
+  borderColor: theme.colors.border,
+},
+
+modalHandle: {
+  alignSelf: 'center',
+  width: 42,
+  height: 4,
+  borderRadius: 2,
+  backgroundColor: 'rgba(255,255,255,0.2)',
+  marginBottom: 18,
+},
+
+modalSubtitle: {
+  color: theme.colors.textSecondary,
+  fontSize: 11,
+  marginTop: 3,
+},
+
+modalCloseButton: {
+  width: 36,
+  height: 36,
+  borderRadius: 10,
+  backgroundColor: theme.colors.overlayLight,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+statusOption: {
+  minHeight: 55,
+  borderRadius: theme.radius.md,
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingHorizontal: 10,
+  marginBottom: 6,
+},
+
+statusOptionSelected: {
+  backgroundColor: 'rgba(0,216,255,0.07)',
+  borderWidth: 1,
+  borderColor: theme.colors.border,
+},
+
+statusOptionIcon: {
+  width: 38,
+  height: 38,
+  borderRadius: 11,
+  alignItems: 'center',
+  justifyContent: 'center',
+  marginRight: 12,
+},
+
+largeStatusDot: {
+  width: 11,
+  height: 11,
+  borderRadius: 6,
+},
+
+statusOptionText: {
+  flex: 1,
+  color: theme.colors.text,
+  fontSize: 14,
+  fontWeight: '600',
+},
+// ============================================================
+// MODERN BILL CARD
+// ============================================================
+
+billCard: {
+  backgroundColor: theme.colors.surface,
+  marginHorizontal: theme.spacing.md,
+  marginTop: 14,
+  borderRadius: 20,
+  overflow: 'hidden',
+
+  borderWidth: 1,
+  borderColor: 'rgba(148, 163, 184, 0.18)',
+
+  elevation: 3,
+
+  shadowColor: '#0F172A',
+  shadowOpacity: 0.08,
+  shadowRadius: 10,
+  shadowOffset: {
+    width: 0,
+    height: 4,
+  },
+},
+
+selectedBillCard: {
+  borderWidth: 1.5,
+  borderColor: theme.colors.primary,
+  shadowColor: theme.colors.primary,
+  shadowOpacity: 0.15,
+  shadowRadius: 12,
+  elevation: 5,
+},
+
+cardAccent: {
+  height: 3,
+  width: '100%',
+},
+
+// ============================================================
+// HEADER
+// ============================================================
+
+modernCardHeader: {
+  paddingHorizontal: 16,
+  paddingTop: 15,
+  paddingBottom: 13,
+
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+},
+
+trackingSection: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  flex: 1,
+  marginRight: 10,
+},
+
+modernCheckbox: {
+  width: 22,
+  height: 22,
+  borderRadius: 7,
+
+  borderWidth: 1.5,
+  borderColor: '#CBD5E1',
+
+  alignItems: 'center',
+  justifyContent: 'center',
+
+  backgroundColor: theme.colors.surface,
+},
+
+modernCheckboxSelected: {
+  backgroundColor: theme.colors.primary,
+  borderColor: theme.colors.primary,
+},
+
+trackingInfo: {
+  marginLeft: 10,
+  flex: 1,
+},
+
+trackingCaption: {
+  fontSize: 8,
+  fontWeight: '800',
+  letterSpacing: 0.8,
+  color: theme.colors.textMuted,
+  marginBottom: 2,
+},
+
+modernTrackingNo: {
+  fontSize: 16,
+  fontWeight: '900',
+  color: theme.colors.primary,
+  letterSpacing: 0.2,
+},
+
+modernStatusBadge: {
+  minHeight: 31,
+  maxWidth: 125,
+
+  borderRadius: 20,
+  borderWidth: 1,
+
+  paddingHorizontal: 9,
+
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 5,
+},
+
+modernStatusDot: {
+  width: 7,
+  height: 7,
+  borderRadius: 4,
+},
+
+modernStatusText: {
+  fontSize: 10,
+  fontWeight: '800',
+  flexShrink: 1,
+},
+
+// ============================================================
+// ROUTE
+// ============================================================
+
+routeSection: {
+  paddingHorizontal: 16,
+  paddingBottom: 15,
+
+  flexDirection: 'row',
+},
+
+routeTimeline: {
+  width: 20,
+  alignItems: 'center',
+  paddingTop: 5,
+},
+
+routeDot: {
+  width: 9,
+  height: 9,
+  borderRadius: 5,
+
+  borderWidth: 2,
+  borderColor: theme.colors.surface,
+},
+
+routeLine: {
+  width: 1.5,
+  flex: 1,
+  minHeight: 32,
+
+  backgroundColor: '#CBD5E1',
+  marginVertical: 2,
+},
+
+routeContent: {
+  flex: 1,
+  marginLeft: 8,
+},
+
+routeRow: {
+  minHeight: 36,
+
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+},
+
+routeTextContainer: {
+  flex: 1,
+  marginRight: 10,
+},
+
+routeLabel: {
+  fontSize: 8,
+  fontWeight: '800',
+  letterSpacing: 0.8,
+  color: theme.colors.textMuted,
+  marginBottom: 2,
+},
+
+routeName: {
+  fontSize: 13,
+  fontWeight: '700',
+  color: theme.colors.text,
+},
+
+destinationRow: {
+  paddingVertical: 4,
+},
+
+destinationBadge: {
+  alignSelf: 'flex-start',
+
+  flexDirection: 'row',
+  alignItems: 'center',
+
+  backgroundColor: 'rgba(0, 216, 255, 0.08)',
+
+  paddingHorizontal: 9,
+  paddingVertical: 5,
+
+  borderRadius: 10,
+},
+
+destinationText: {
+  marginLeft: 4,
+
+  fontSize: 10,
+  fontWeight: '800',
+
+  color: theme.colors.primary,
+},
+
+// ============================================================
+// FINANCIAL SECTION
+// ============================================================
+
+financialSection: {
+  marginHorizontal: 16,
+
+  borderTopWidth: 1,
+  borderTopColor: theme.colors.divider,
+
+  paddingVertical: 13,
+
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'space-between',
+},
+
+amountLabel: {
+  fontSize: 8,
+  fontWeight: '800',
+  letterSpacing: 0.7,
+  color: theme.colors.textMuted,
+  marginBottom: 3,
+},
+
+modernAmount: {
+  fontSize: 17,
+  fontWeight: '900',
+  color: theme.colors.success,
+},
+
+dateContainer: {
+  flexDirection: 'row',
+  alignItems: 'center',
+},
+
+dateIconContainer: {
+  width: 30,
+  height: 30,
+
+  borderRadius: 9,
+
+  backgroundColor:
+    theme.colors.surfaceSecondary,
+
+  alignItems: 'center',
+  justifyContent: 'center',
+
+  marginRight: 8,
+},
+
+modernDate: {
+  fontSize: 11,
+  fontWeight: '700',
+  color: theme.colors.text,
+},
+
+// ============================================================
+// ACTION BAR
+// ============================================================
+
+modernActionRow: {
+  minHeight: 49,
+
+  borderTopWidth: 1,
+  borderTopColor: theme.colors.divider,
+
+  backgroundColor:
+    theme.colors.surfaceSecondary,
+
+  flexDirection: 'row',
+  alignItems: 'stretch',
+},
+
+modernActionButton: {
+  flex: 1,
+
+  flexDirection: 'row',
+  alignItems: 'center',
+  justifyContent: 'center',
+
+  gap: 5,
+},
+
+modernActionText: {
+  fontSize: 10,
+  fontWeight: '800',
+  color: theme.colors.textSecondary,
+},
+
+actionDivider: {
+  width: 1,
+  marginVertical: 10,
+  backgroundColor: theme.colors.divider,
+},
+
 });
 
 

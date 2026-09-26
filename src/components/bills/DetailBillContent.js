@@ -11,16 +11,17 @@ import {
   Modal,
   Share,
   Dimensions,
-  Alert,
 } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
 import { Ionicons } from '@expo/vector-icons';
 import { theme } from '../../theme/theme';
-import { FrontEndURL } from '../../constants/urls';
+import { END_POINT, FrontEndURL } from '../../constants/urls';
 import EposPrinter from './EposPrinter';
 import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { File, Paths } from 'expo-file-system';
+import { Alert } from '../Alert';
+import api from '../../utils/axioServices';
 // import * as MediaLibrary from 'expo-media-library';
 
 const { width } = Dimensions.get('window');
@@ -32,8 +33,8 @@ const DetailBillContent = ({ bill, loading, error, onSearch, navigation }) => {
   const [trackingUrl, setTrackingUrl] = useState('');
   const [downloadingPNG, setDownloadingPNG] = useState(false);
   const [sharingPNG, setSharingPNG] = useState(false);
-
-
+  const [sendingSMS, setSendingSMS] = useState(false);
+  const [smsModalVisible, setSmsModalVisible] = useState(false);
 
   // Reference for hidden EposPrinter thermal card
   const printRef = useRef(null);
@@ -145,6 +146,56 @@ const DetailBillContent = ({ bill, loading, error, onSearch, navigation }) => {
       uri: destinationFile.uri,
       fileName,
     };
+  };
+
+  const sendSMS = async (type) => {
+    let endpoint = '';
+
+    switch (type) {
+      case 'sender':
+        endpoint = 'send_sender_sms';
+        break;
+
+      case 'consignee':
+        endpoint = 'send_consignee_sms';
+        break;
+
+      case 'both':
+        endpoint = 'send_both_sms';
+        break;
+
+      default:
+        return;
+    }
+
+    if (!bill?.id) {
+      Alert.alert('SMS', 'Bill ID is not available.');
+      return;
+    }
+
+    if (sendingSMS) return;
+
+    setSendingSMS(true);
+
+    try {
+      const response = await api.post(
+        `${END_POINT}/express-api/api/bills/${bill.id}/${endpoint}/`
+      );
+
+      Alert.alert(
+        'SMS',
+        response?.data?.message || 'SMS sent successfully.'
+      );
+    } catch (err) {
+      console.error('SMS failed:', err);
+
+      Alert.alert(
+        'SMS Failed',
+        err?.response?.data?.message || 'Could not send SMS.'
+      );
+    } finally {
+      setSendingSMS(false);
+    }
   };
 
 
@@ -403,6 +454,57 @@ const DetailBillContent = ({ bill, loading, error, onSearch, navigation }) => {
             Share Link
           </Text>
         </TouchableOpacity>
+        
+        {/* SEND SMS */}
+        <TouchableOpacity
+          activeOpacity={0.82}
+          style={[
+            styles.smsToolbarButton,
+            (sendingSMS || downloadingPNG || sharingPNG) &&
+              styles.disabledButton,
+          ]}
+          onPress={() => setSmsModalVisible(true)}
+          disabled={
+            sendingSMS ||
+            downloadingPNG ||
+            sharingPNG
+          }
+        >
+          <View style={styles.smsIconContainer}>
+            {sendingSMS ? (
+              <ActivityIndicator
+                size="small"
+                color="#FFFFFF"
+              />
+            ) : (
+              <Ionicons
+                name="chatbubbles"
+                size={24}
+                color={theme.colors.primaryDark}
+              />
+
+            )}
+          </View>
+
+          <View style={styles.smsButtonContent}>
+            <Text style={styles.smsButtonTitle}>
+              {sendingSMS ? 'Sending...' : 'Send SMS'}
+            </Text>
+
+            <Text style={styles.smsButtonSubtitle}>
+              Notify customers
+            </Text>
+          </View>
+
+          {!sendingSMS && (
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color="#BAE6FD"
+            />
+          )}
+        </TouchableOpacity>
+
 
       </View>
 
@@ -765,6 +867,195 @@ const DetailBillContent = ({ bill, loading, error, onSearch, navigation }) => {
           </View>
         </View>
       </Modal>
+
+      {/* SMS Send Modal */}
+
+      <Modal
+        visible={smsModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSmsModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.smsModalContent}>
+
+            {/* Header */}
+            <View style={styles.smsModalHeader}>
+              <View style={styles.smsModalIcon}>
+                <Ionicons
+                  name="chatbubbles"
+                  size={24}
+                  color="#0284C7"
+                />
+              </View>
+
+              <View style={styles.smsModalHeaderText}>
+                <Text style={styles.smsModalTitle}>
+                  Send SMS
+                </Text>
+
+                <Text style={styles.smsModalSubtitle}>
+                  Choose who should receive the notification
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={styles.smsCloseButton}
+                onPress={() => setSmsModalVisible(false)}
+              >
+                <Ionicons
+                  name="close"
+                  size={20}
+                  color="#64748B"
+                />
+              </TouchableOpacity>
+            </View>
+
+            {/* Sender */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[
+                styles.smsOptionCard,
+                { borderColor: '#BFDBFE' },
+              ]}
+              onPress={() => {
+                setSmsModalVisible(false);
+                sendSMS('sender');
+              }}
+              disabled={sendingSMS}
+            >
+              <View
+                style={[
+                  styles.smsOptionIcon,
+                  { backgroundColor: '#DBEAFE' },
+                ]}
+              >
+                <Ionicons
+                  name="arrow-up"
+                  size={21}
+                  color="#2563EB"
+                />
+              </View>
+
+              <View style={styles.smsOptionContent}>
+                <Text style={styles.smsOptionTitle}>
+                  Sender
+                </Text>
+
+                <Text style={styles.smsOptionDescription}>
+                  Send notification to the sender
+                </Text>
+              </View>
+
+              <Ionicons
+                name="chevron-forward"
+                size={20}
+                color="#94A3B8"
+              />
+            </TouchableOpacity>
+
+            {/* Consignee */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[
+                styles.smsOptionCard,
+                { borderColor: '#BBF7D0' },
+              ]}
+              onPress={() => {
+                setSmsModalVisible(false);
+                sendSMS('consignee');
+              }}
+              disabled={sendingSMS}
+            >
+              <View
+                style={[
+                  styles.smsOptionIcon,
+                  { backgroundColor: '#DCFCE7' },
+                ]}
+              >
+                <Ionicons
+                  name="arrow-down"
+                  size={21}
+                  color="#16A34A"
+                />
+              </View>
+
+              <View style={styles.smsOptionContent}>
+                <Text style={styles.smsOptionTitle}>
+                  Consignee
+                </Text>
+
+                <Text style={styles.smsOptionDescription}>
+                  Send notification to the receiver
+                </Text>
+              </View>
+
+              <Ionicons
+                name="chevron-forward"
+                size={20}
+                color="#94A3B8"
+              />
+            </TouchableOpacity>
+
+            {/* Both */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={[
+                styles.smsOptionCard,
+                { borderColor: '#DDD6FE' },
+              ]}
+              onPress={() => {
+                setSmsModalVisible(false);
+                sendSMS('both');
+              }}
+              disabled={sendingSMS}
+            >
+              <View
+                style={[
+                  styles.smsOptionIcon,
+                  { backgroundColor: '#EDE9FE' },
+                ]}
+              >
+                <Ionicons
+                  name="people"
+                  size={21}
+                  color="#7C3AED"
+                />
+              </View>
+
+              <View style={styles.smsOptionContent}>
+                <Text style={styles.smsOptionTitle}>
+                  Sender & Consignee
+                </Text>
+
+                <Text style={styles.smsOptionDescription}>
+                  Notify both customers at once
+                </Text>
+              </View>
+
+              <Ionicons
+                name="chevron-forward"
+                size={20}
+                color="#94A3B8"
+              />
+            </TouchableOpacity>
+
+            {/* Cancel */}
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.smsCancelButton}
+              onPress={() => setSmsModalVisible(false)}
+            >
+              <Text style={styles.smsCancelText}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+
+          </View>
+        </View>
+      </Modal>
+
+
     </ScrollView>
   );
 };
@@ -1092,6 +1383,168 @@ const styles = StyleSheet.create({
     color: '#111111',
     marginLeft: 3,
   },
+  smsToolbarButton: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  minHeight: 58,
+  paddingVertical: 8,
+  paddingHorizontal: 10,
+  paddingRight: 14,
+  borderRadius: theme.radius.lg,
+  backgroundColor: theme.colors.primaryDark,
+  borderWidth: 1,
+  borderColor: theme.colors.primary,
+  shadowColor: theme.colors.primaryDark,
+  shadowOffset: {
+    width: 0,
+    height: 5,
+  },
+  shadowOpacity: 0.22,
+  shadowRadius: 8,
+  elevation: 5,
+},
+
+smsIconContainer: {
+  width: 40,
+  height: 40,
+  borderRadius: theme.radius.md,
+  backgroundColor: theme.colors.backgroundSecondary,
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+smsButtonContent: {
+  marginLeft: 10,
+  marginRight: 10,
+  justifyContent: 'center',
+},
+
+smsButtonTitle: {
+  color: theme.colors.white,
+  fontSize: 14,
+  fontWeight: '800',
+  letterSpacing: 0.2,
+},
+
+smsButtonSubtitle: {
+  color: theme.colors.primaryLight,
+  fontSize: 10,
+  fontWeight: '500',
+  marginTop: 2,
+},
+
+disabledButton: {
+  opacity: 0.65,
+},
+
+smsModalContent: {
+  width: width * 0.90,
+  maxWidth: 440,
+  backgroundColor: theme.colors.surfaceElevated,
+  borderRadius: theme.radius.xxl,
+  padding: theme.spacing.xxl,
+  borderWidth: 1,
+  borderColor: theme.colors.border,
+  ...theme.shadows.elevated,
+},
+
+smsModalHeader: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  marginBottom: theme.spacing.xxl,
+},
+
+smsModalIcon: {
+  width: 48,
+  height: 48,
+  borderRadius: theme.radius.lg,
+  backgroundColor: theme.colors.infoLight,
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+smsModalHeaderText: {
+  flex: 1,
+  marginLeft: theme.spacing.lg,
+},
+
+smsModalTitle: {
+  fontSize: 19,
+  fontWeight: '800',
+  color: theme.colors.text,
+},
+
+smsModalSubtitle: {
+  fontSize: 11,
+  color: theme.colors.textSecondary,
+  marginTop: 3,
+  lineHeight: 16,
+},
+
+smsCloseButton: {
+  width: 36,
+  height: 36,
+  borderRadius: theme.radius.round,
+  backgroundColor: theme.colors.overlayLight,
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+smsOptionCard: {
+  width: '100%',
+  minHeight: 72,
+  borderRadius: theme.radius.lg,
+  borderWidth: 1,
+  backgroundColor: theme.colors.surfaceSecondary,
+  flexDirection: 'row',
+  alignItems: 'center',
+  paddingHorizontal: theme.spacing.lg,
+  marginBottom: theme.spacing.sm,
+},
+
+smsOptionIcon: {
+  width: 44,
+  height: 44,
+  borderRadius: theme.radius.md,
+  justifyContent: 'center',
+  alignItems: 'center',
+},
+
+smsOptionContent: {
+  flex: 1,
+  marginLeft: theme.spacing.lg,
+  marginRight: theme.spacing.sm,
+},
+
+smsOptionTitle: {
+  fontSize: 14,
+  fontWeight: '800',
+  color: theme.colors.text,
+},
+
+smsOptionDescription: {
+  fontSize: 11,
+  color: theme.colors.textSecondary,
+  marginTop: 3,
+},
+
+smsCancelButton: {
+  height: 48,
+  borderRadius: theme.radius.md,
+  backgroundColor: theme.colors.overlayLight,
+  justifyContent: 'center',
+  alignItems: 'center',
+  marginTop: theme.spacing.sm,
+  borderWidth: 1,
+  borderColor: theme.colors.borderLight,
+},
+
+smsCancelText: {
+  fontSize: 14,
+  fontWeight: '700',
+  color: theme.colors.textSecondary,
+},
+
 
 });
 

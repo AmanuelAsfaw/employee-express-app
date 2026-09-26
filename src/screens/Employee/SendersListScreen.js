@@ -1,24 +1,36 @@
 // src/screens/Employee/SendersListScreen.js
 
-import React, { useEffect, useState } from 'react'
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
+
 import {
-  View,
+  ActivityIndicator,
+  FlatList,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  RefreshControl,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  FlatList,
-  StyleSheet,
-  ActivityIndicator,
-  Alert,
-  Modal,
-  ScrollView,
+  View,
 } from 'react-native'
+
 import { useRoute } from '@react-navigation/native'
 import { Ionicons } from '@expo/vector-icons'
 
 import api from '../../utils/axioServices'
 import { END_POINT } from '../../constants/urls'
 import { theme } from '../../theme/theme'
+import { Alert } from '../../components/Alert'
 
 const emptyForm = {
   name: '',
@@ -28,6 +40,159 @@ const emptyForm = {
   country: '',
 }
 
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const getInitials = (name = '') => {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+
+  if (words.length === 0) {
+    return 'S'
+  }
+
+  if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase()
+  }
+
+  return (
+    words[0].charAt(0) +
+    words[words.length - 1].charAt(0)
+  ).toUpperCase()
+}
+
+const getAvatarColor = (name = '') => {
+  const colors = [
+    '#2563EB',
+    '#7C3AED',
+    '#0891B2',
+    '#059669',
+    '#D97706',
+    '#DB2777',
+    '#4F46E5',
+  ]
+
+  let hash = 0
+
+  for (let i = 0; i < name.length; i++) {
+    hash =
+      name.charCodeAt(i) +
+      ((hash << 5) - hash)
+  }
+
+  return colors[Math.abs(hash) % colors.length]
+}
+
+/* -------------------------------------------------------------------------- */
+/* Detail Row                                                                 */
+/* -------------------------------------------------------------------------- */
+
+const DetailRow = ({
+  icon,
+  label,
+  value,
+  multiline = false,
+}) => {
+  return (
+    <View style={styles.detailRow}>
+      <View style={styles.detailIcon}>
+        <Ionicons
+          name={icon}
+          size={15}
+          color={theme.colors.primary}
+        />
+      </View>
+
+      <View style={styles.detailContent}>
+        <Text style={styles.detailLabel}>
+          {label}
+        </Text>
+
+        <Text
+          style={styles.detailValue}
+          numberOfLines={multiline ? 2 : 1}
+        >
+          {value || 'Not provided'}
+        </Text>
+      </View>
+    </View>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Input Field                                                                */
+/* -------------------------------------------------------------------------- */
+
+const InputField = ({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  icon,
+  multiline = false,
+  numberOfLines = 1,
+  keyboardType = 'default',
+  required = false,
+  autoCapitalize = 'sentences',
+}) => {
+  return (
+    <View style={styles.inputContainer}>
+      <View style={styles.inputLabelRow}>
+        <Text style={styles.inputLabel}>
+          {label}
+        </Text>
+
+        {required && (
+          <Text style={styles.required}>
+            *
+          </Text>
+        )}
+      </View>
+
+      <View
+        style={[
+          styles.inputWrapper,
+          multiline && styles.inputWrapperMultiline,
+        ]}
+      >
+        <Ionicons
+          name={icon}
+          size={18}
+          color={theme.colors.textSecondary}
+          style={[
+            styles.inputIcon,
+            multiline && styles.inputIconMultiline,
+          ]}
+        />
+
+        <TextInput
+          style={[
+            styles.input,
+            multiline && styles.textarea,
+          ]}
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={
+            theme.colors.textSecondary
+          }
+          multiline={multiline}
+          numberOfLines={numberOfLines}
+          keyboardType={keyboardType}
+          autoCapitalize={autoCapitalize}
+          textAlignVertical={
+            multiline ? 'top' : 'center'
+          }
+        />
+      </View>
+    </View>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Main Screen                                                                */
+/* -------------------------------------------------------------------------- */
+
 const SendersListScreen = () => {
   const route = useRoute()
 
@@ -35,6 +200,7 @@ const SendersListScreen = () => {
 
   const [senders, setSenders] = useState([])
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
   const [search, setSearch] = useState('')
 
@@ -44,43 +210,87 @@ const SendersListScreen = () => {
   const [currentId, setCurrentId] = useState(null)
   const [formData, setFormData] = useState(emptyForm)
 
-  const loadSenders = async () => {
-    try {
-      setLoading(true)
+  const [saving, setSaving] = useState(false)
 
-      const res = await api.get(
-        `${END_POINT}/express-api/api/senders/?search=${encodeURIComponent(search)}`
-      )
+  /*
+   * Prevent senderId from opening the same modal repeatedly
+   * when the sender list changes.
+   */
+  const openedSenderRef = useRef(null)
 
-      setSenders(res.data.results || res.data || [])
-    } catch (err) {
-      console.error('Error loading senders:', err)
+  /* ------------------------------------------------------------------------ */
+  /* Load Senders                                                             */
+  /* ------------------------------------------------------------------------ */
 
-      Alert.alert(
-        'Error',
-        'Unable to load senders.'
-      )
-    } finally {
-      setLoading(false)
-    }
-  }
+  const loadSenders = useCallback(
+    async (showRefresh = false) => {
+      try {
+        if (showRefresh) {
+          setRefreshing(true)
+        } else {
+          setLoading(true)
+        }
+
+        const res = await api.get(
+          `${END_POINT}/express-api/api/senders/?search=${encodeURIComponent(
+            search
+          )}`
+        )
+
+        setSenders(
+          res.data.results ||
+            res.data ||
+            []
+        )
+      } catch (err) {
+        console.error(
+          'Error loading senders:',
+          err
+        )
+
+        Alert.alert(
+          'Error',
+          'Unable to load senders.'
+        )
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    },
+    [search]
+  )
 
   useEffect(() => {
     loadSenders()
-  }, [search])
+  }, [loadSenders])
 
-  // Open sender automatically when senderId is passed
+  /* ------------------------------------------------------------------------ */
+  /* Auto Open Sender                                                         */
+  /* ------------------------------------------------------------------------ */
+
   useEffect(() => {
-    if (sender_id && senders.length > 0) {
-      const sender = senders.find(
-        (s) => String(s.id) === String(sender_id)
-      )
+    if (
+      !sender_id ||
+      senders.length === 0 ||
+      openedSenderRef.current === sender_id
+    ) {
+      return
+    }
 
-      if (sender) {
-        openEdit(sender)
-      }
+    const sender = senders.find(
+      (item) =>
+        String(item.id) === String(sender_id)
+    )
+
+    if (sender) {
+      openedSenderRef.current = sender_id
+      openEdit(sender)
     }
   }, [sender_id, senders])
+
+  /* ------------------------------------------------------------------------ */
+  /* Modal                                                                    */
+  /* ------------------------------------------------------------------------ */
 
   const openCreate = () => {
     setEditing(false)
@@ -96,7 +306,8 @@ const SendersListScreen = () => {
     setFormData({
       name: sender.name || '',
       phone: sender.phone || '',
-      company_name_address: sender.company_name_address || '',
+      company_name_address:
+        sender.company_name_address || '',
       tin_number: sender.tin_number || '',
       country: sender.country || '',
     })
@@ -105,6 +316,8 @@ const SendersListScreen = () => {
   }
 
   const closeModal = () => {
+    if (saving) return
+
     setModalVisible(false)
     setEditing(false)
     setCurrentId(null)
@@ -112,19 +325,29 @@ const SendersListScreen = () => {
   }
 
   const updateField = (field, value) => {
-    setFormData((prev) => ({
-      ...prev,
+    setFormData((previous) => ({
+      ...previous,
       [field]: value,
     }))
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Save                                                                     */
+  /* ------------------------------------------------------------------------ */
+
   const saveSender = async () => {
     if (!formData.name.trim()) {
-      Alert.alert('Validation', 'Sender name is required.')
+      Alert.alert(
+        'Validation',
+        'Sender name is required.'
+      )
+
       return
     }
 
     try {
+      setSaving(true)
+
       if (editing) {
         await api.put(
           `${END_POINT}/express-api/api/senders/${currentId}/`,
@@ -138,21 +361,35 @@ const SendersListScreen = () => {
       }
 
       closeModal()
-      loadSenders()
+
+      await loadSenders()
     } catch (err) {
-      console.error('Error saving sender:', err)
+      console.error(
+        'Error saving sender:',
+        err
+      )
+
+      const message =
+        err?.response?.data?.detail ||
+        'Unable to save sender.'
 
       Alert.alert(
         'Error',
-        'Unable to save sender.'
+        message
       )
+    } finally {
+      setSaving(false)
     }
   }
 
-  const deleteSender = (id) => {
+  /* ------------------------------------------------------------------------ */
+  /* Delete                                                                   */
+  /* ------------------------------------------------------------------------ */
+
+  const deleteSender = (sender) => {
     Alert.alert(
       'Delete Sender',
-      'Are you sure you want to delete this sender?',
+      `Are you sure you want to delete "${sender.name}"?`,
       [
         {
           text: 'Cancel',
@@ -163,18 +400,25 @@ const SendersListScreen = () => {
           style: 'destructive',
           onPress: async () => {
             try {
+              setLoading(true)
+
               await api.delete(
-                `${END_POINT}/express-api/api/senders/${id}/`
+                `${END_POINT}/express-api/api/senders/${sender.id}/`
               )
 
-              loadSenders()
+              await loadSenders()
             } catch (err) {
-              console.error('Error deleting sender:', err)
+              console.error(
+                'Error deleting sender:',
+                err
+              )
 
               Alert.alert(
                 'Error',
                 'Unable to delete sender.'
               )
+
+              setLoading(false)
             }
           },
         },
@@ -182,341 +426,540 @@ const SendersListScreen = () => {
     )
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Derived                                                                  */
+  /* ------------------------------------------------------------------------ */
+
+  const resultText = useMemo(() => {
+    if (loading) return ''
+
+    if (senders.length === 1) {
+      return '1 sender'
+    }
+
+    return `${senders.length} senders`
+  }, [loading, senders.length])
+
+  /* ------------------------------------------------------------------------ */
+  /* Sender Card                                                              */
+  /* ------------------------------------------------------------------------ */
+
   const renderSender = ({ item }) => {
+    const initials = getInitials(item.name)
+    const avatarColor = getAvatarColor(
+      item.name
+    )
+
     return (
       <View style={styles.senderCard}>
+        {/* Header */}
         <View style={styles.senderHeader}>
-          <View style={styles.senderTitleContainer}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {item.name?.charAt(0)?.toUpperCase() || 'S'}
-              </Text>
-            </View>
+          <View
+            style={[
+              styles.avatar,
+              {
+                backgroundColor: avatarColor,
+              },
+            ]}
+          >
+            <Text style={styles.avatarText}>
+              {initials}
+            </Text>
+          </View>
 
-            <View style={styles.senderTitle}>
-              <Text style={styles.senderName}>
-                {item.name || '-'}
-              </Text>
+          <View style={styles.senderIdentity}>
+            <Text
+              style={styles.senderName}
+              numberOfLines={1}
+            >
+              {item.name || 'Unnamed sender'}
+            </Text>
 
-              <Text style={styles.senderPhone}>
-                {item.phone || '-'}
+            <View style={styles.countryRow}>
+              <View style={styles.countryDot} />
+
+              <Text
+                style={styles.countryText}
+                numberOfLines={1}
+              >
+                {item.country ||
+                  'Country not specified'}
               </Text>
             </View>
           </View>
 
+          {/* Actions */}
           <View style={styles.actionContainer}>
             <TouchableOpacity
               style={styles.editButton}
-              onPress={() => openEdit(item)}
+              activeOpacity={0.7}
+              onPress={() =>
+                openEdit(item)
+              }
             >
               <Ionicons
                 name="create-outline"
-                size={19}
-                color="#f9a825"
+                size={18}
+                color={theme.colors.warning}
               />
             </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.deleteButton}
-              onPress={() => deleteSender(item.id)}
+              activeOpacity={0.7}
+              onPress={() =>
+                deleteSender(item)
+              }
             >
               <Ionicons
                 name="trash-outline"
-                size={19}
-                color="#dc3545"
+                size={18}
+                color={theme.colors.danger}
               />
             </TouchableOpacity>
           </View>
         </View>
 
+        {/* Divider */}
         <View style={styles.divider} />
 
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>
-            Company / Address
-          </Text>
+        {/* Details */}
+        <View style={styles.details}>
+          <DetailRow
+            icon="call-outline"
+            label="Phone"
+            value={item.phone}
+          />
 
-          <Text style={styles.infoValue}>
-            {item.company_name_address || '-'}
-          </Text>
-        </View>
+          <DetailRow
+            icon="business-outline"
+            label="Company / Address"
+            value={
+              item.company_name_address
+            }
+            multiline
+          />
 
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>
-            TIN
-          </Text>
-
-          <Text style={styles.infoValue}>
-            {item.tin_number || '-'}
-          </Text>
-        </View>
-
-        <View style={styles.infoRow}>
-          <Text style={styles.infoLabel}>
-            Country
-          </Text>
-
-          <Text style={styles.infoValue}>
-            {item.country || '-'}
-          </Text>
+          <DetailRow
+            icon="card-outline"
+            label="TIN Number"
+            value={item.tin_number}
+          />
         </View>
       </View>
     )
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Empty State                                                              */
+  /* ------------------------------------------------------------------------ */
 
   const renderEmpty = () => {
     if (loading) {
       return null
     }
 
+    const hasSearch =
+      search.trim().length > 0
+
     return (
       <View style={styles.emptyContainer}>
-        <Ionicons
-          name="people-outline"
-          size={50}
-          color="#adb5bd"
-        />
+        <View style={styles.emptyIcon}>
+          <Ionicons
+            name={
+              hasSearch
+                ? 'search-outline'
+                : 'people-outline'
+            }
+            size={32}
+            color={theme.colors.primary}
+          />
+        </View>
 
         <Text style={styles.emptyTitle}>
-          No Senders found
+          {hasSearch
+            ? 'No matching senders'
+            : 'No senders yet'}
         </Text>
 
         <Text style={styles.emptyText}>
-          Try changing your search or add a new sender.
+          {hasSearch
+            ? 'Try another name, phone number, or company.'
+            : 'Add your first sender to start managing your shipment contacts.'}
         </Text>
+
+        {!hasSearch && (
+          <TouchableOpacity
+            style={styles.emptyButton}
+            activeOpacity={0.8}
+            onPress={openCreate}
+          >
+            <Ionicons
+              name="add"
+              size={18}
+              color="#FFFFFF"
+            />
+
+            <Text
+              style={styles.emptyButtonText}
+            >
+              Add Sender
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     )
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Render                                                                   */
+  /* ------------------------------------------------------------------------ */
+
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <View style={styles.headerText}>
+            <Text style={styles.eyebrow}>
+              DIRECTORY
+            </Text>
 
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>
-          Senders
-        </Text>
+            <Text style={styles.title}>
+              Senders
+            </Text>
 
-        <TouchableOpacity
-          style={styles.addButton}
-          onPress={openCreate}
-        >
+            <Text style={styles.subtitle}>
+              Manage your shipment contacts
+            </Text>
+          </View>
+
+          <TouchableOpacity
+            style={styles.addButton}
+            activeOpacity={0.8}
+            onPress={openCreate}
+          >
+            <View style={styles.addIconContainer}>
+              <Ionicons
+                name="add"
+                size={21}
+                color="#FFFFFF"
+              />
+            </View>
+
+            <Text style={styles.addButtonText}>
+              New
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Search */}
+        <View style={styles.searchContainer}>
           <Ionicons
-            name="add"
-            size={21}
-            color="#fff"
+            name="search-outline"
+            size={20}
+            color={theme.colors.primary}
+            style={styles.searchIcon}
           />
 
-          <Text style={styles.addButtonText}>
-            New Sender
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search by name, phone or company"
+            placeholderTextColor={
+              theme.colors.textSecondary
+            }
+            value={search}
+            onChangeText={setSearch}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+
+          {search.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setSearch('')}
+              style={styles.clearSearch}
+              activeOpacity={0.7}
+            >
+              <Ionicons
+                name="close-circle"
+                size={19}
+                color={theme.colors.textSecondary}
+              />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        {/* Results Header */}
+        <View style={styles.resultsHeader}>
+          <Text style={styles.resultsTitle}>
+            Your senders
           </Text>
-        </TouchableOpacity>
-      </View>
 
-      {/* Search */}
-      <View style={styles.searchContainer}>
-        <Ionicons
-          name="search-outline"
-          size={20}
-          color="#6c757d"
-          style={styles.searchIcon}
-        />
+          {!!resultText && (
+            <View style={styles.countBadge}>
+              <Text style={styles.countText}>
+                {resultText}
+              </Text>
+            </View>
+          )}
+        </View>
 
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search sender..."
-          placeholderTextColor="#9ca3af"
-          value={search}
-          onChangeText={setSearch}
-          autoCapitalize="none"
-          returnKeyType="search"
-        />
+        {/* List */}
+        {loading && senders.length === 0 ? (
+          <View style={styles.loadingContainer}>
+            <View style={styles.loadingCard}>
+              <ActivityIndicator
+                size="small"
+                color={theme.colors.primary}
+              />
 
-        {search.length > 0 && (
-          <TouchableOpacity
-            onPress={() => setSearch('')}
-            style={styles.clearSearch}
-          >
-            <Ionicons
-              name="close-circle"
-              size={19}
-              color="#9ca3af"
-            />
-          </TouchableOpacity>
+              <Text style={styles.loadingText}>
+                Loading senders...
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <FlatList
+            data={senders}
+            keyExtractor={(item) =>
+              String(item.id)
+            }
+            renderItem={renderSender}
+            ListEmptyComponent={
+              renderEmpty
+            }
+            contentContainerStyle={[
+              styles.listContent,
+              senders.length === 0 &&
+                styles.emptyList,
+            ]}
+            showsVerticalScrollIndicator={
+              false
+            }
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={() =>
+                  loadSenders(true)
+                }
+                tintColor={
+                  theme.colors.primary
+                }
+                colors={[
+                  theme.colors.primary,
+                ]}
+              />
+            }
+            keyboardShouldPersistTaps="handled"
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={10}
+          />
         )}
       </View>
 
-      {/* Loading */}
-      {loading && senders.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator
-            size="large"
-            color="#321fdb"
-          />
+      {/* ------------------------------------------------------------------ */}
+      {/* Create / Edit Modal                                                 */}
+      {/* ------------------------------------------------------------------ */}
 
-          <Text style={styles.loadingText}>
-            Loading senders...
-          </Text>
-        </View>
-      ) : (
-        <FlatList
-          data={senders}
-          keyExtractor={(item) => String(item.id)}
-          renderItem={renderSender}
-          ListEmptyComponent={renderEmpty}
-          contentContainerStyle={
-            senders.length === 0
-              ? styles.emptyList
-              : styles.listContent
-          }
-          showsVerticalScrollIndicator={false}
-          refreshing={loading}
-          onRefresh={loadSenders}
-        />
-      )}
-
-      {/* Create / Edit Modal */}
       <Modal
         visible={modalVisible}
         transparent
         animationType="slide"
         onRequestClose={closeModal}
+        statusBarTranslucent
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={
+            Platform.OS === 'ios'
+              ? 'padding'
+              : 'height'
+          }
+        >
           <View style={styles.modalContainer}>
+            {/* Drag Handle */}
+            <View
+              style={styles.dragHandle}
+            />
 
             {/* Modal Header */}
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {editing
-                  ? 'Edit Sender'
-                  : 'New Sender'}
-              </Text>
+              <View
+                style={styles.modalTitleArea}
+              >
+                <View
+                  style={styles.modalIcon}
+                >
+                  <Ionicons
+                    name={
+                      editing
+                        ? 'create-outline'
+                        : 'person-add-outline'
+                    }
+                    size={21}
+                    color="#FFFFFF"
+                  />
+                </View>
+
+                <View
+                  style={styles.modalTitleText}
+                >
+                  <Text
+                    style={styles.modalTitle}
+                  >
+                    {editing
+                      ? 'Edit Sender'
+                      : 'New Sender'}
+                  </Text>
+
+                  <Text
+                    style={
+                      styles.modalSubtitle
+                    }
+                  >
+                    {editing
+                      ? 'Update sender information'
+                      : 'Add a new shipment contact'}
+                  </Text>
+                </View>
+              </View>
 
               <TouchableOpacity
                 onPress={closeModal}
                 style={styles.closeButton}
+                disabled={saving}
+                activeOpacity={0.7}
               >
                 <Ionicons
                   name="close"
-                  size={25}
-                  color="#495057"
+                  size={22}
+                  color={theme.colors.text}
                 />
               </TouchableOpacity>
             </View>
 
+            {/* Body */}
             <ScrollView
               style={styles.modalBody}
-              showsVerticalScrollIndicator={false}
+              showsVerticalScrollIndicator={
+                false
+              }
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
+              contentContainerStyle={
+                styles.modalBodyContent
+              }
             >
+              <Text
+                style={styles.sectionLabel}
+              >
+                BASIC INFORMATION
+              </Text>
 
-              {/* Sender Name */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>
-                  Sender Name
-                </Text>
+              <InputField
+                label="Sender Name"
+                value={formData.name}
+                onChangeText={(value) =>
+                  updateField(
+                    'name',
+                    value
+                  )
+                }
+                placeholder="e.g. Abebe Kebede"
+                icon="person-outline"
+                required
+                autoCapitalize="words"
+              />
 
-                <TextInput
-                  style={styles.input}
-                  value={formData.name}
-                  onChangeText={(value) =>
-                    updateField('name', value)
-                  }
-                  placeholder="Enter sender name"
-                  placeholderTextColor="#adb5bd"
-                />
-              </View>
+              <InputField
+                label="Phone Number"
+                value={formData.phone}
+                onChangeText={(value) =>
+                  updateField(
+                    'phone',
+                    value
+                  )
+                }
+                placeholder="+251 91 234 5678"
+                icon="call-outline"
+                keyboardType="phone-pad"
+              />
 
-              {/* Phone */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>
-                  Phone
-                </Text>
+              <InputField
+                label="Country"
+                value={formData.country}
+                onChangeText={(value) =>
+                  updateField(
+                    'country',
+                    value
+                  )
+                }
+                placeholder="e.g. Ethiopia"
+                icon="globe-outline"
+                autoCapitalize="words"
+              />
 
-                <TextInput
-                  style={styles.input}
-                  value={formData.phone}
-                  onChangeText={(value) =>
-                    updateField('phone', value)
-                  }
-                  placeholder="Enter phone number"
-                  placeholderTextColor="#adb5bd"
-                  keyboardType="phone-pad"
-                />
-              </View>
+              <Text
+                style={[
+                  styles.sectionLabel,
+                  styles.businessSection,
+                ]}
+              >
+                BUSINESS DETAILS
+              </Text>
 
-              {/* Company / Address */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>
-                  Company / Address
-                </Text>
+              <InputField
+                label="Company / Address"
+                value={
+                  formData.company_name_address
+                }
+                onChangeText={(value) =>
+                  updateField(
+                    'company_name_address',
+                    value
+                  )
+                }
+                placeholder="Enter company name or full address"
+                icon="business-outline"
+                multiline
+                numberOfLines={4}
+              />
 
-                <TextInput
-                  style={[
-                    styles.input,
-                    styles.textarea,
-                  ]}
-                  value={formData.company_name_address}
-                  onChangeText={(value) =>
-                    updateField(
-                      'company_name_address',
-                      value
-                    )
-                  }
-                  placeholder="Enter company or address"
-                  placeholderTextColor="#adb5bd"
-                  multiline
-                  numberOfLines={4}
-                  textAlignVertical="top"
-                />
-              </View>
+              <InputField
+                label="TIN Number"
+                value={
+                  formData.tin_number
+                }
+                onChangeText={(value) =>
+                  updateField(
+                    'tin_number',
+                    value
+                  )
+                }
+                placeholder="Enter TIN number"
+                icon="card-outline"
+              />
 
-              {/* TIN */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>
-                  TIN Number
-                </Text>
-
-                <TextInput
-                  style={styles.input}
-                  value={formData.tin_number}
-                  onChangeText={(value) =>
-                    updateField('tin_number', value)
-                  }
-                  placeholder="Enter TIN number"
-                  placeholderTextColor="#adb5bd"
-                />
-              </View>
-
-              {/* Country */}
-              <View style={styles.inputContainer}>
-                <Text style={styles.inputLabel}>
-                  Country
-                </Text>
-
-                <TextInput
-                  style={styles.input}
-                  value={formData.country}
-                  onChangeText={(value) =>
-                    updateField('country', value)
-                  }
-                  placeholder="Enter country"
-                  placeholderTextColor="#adb5bd"
-                />
-              </View>
-
-              <View style={styles.bottomSpace} />
+              <View
+                style={styles.bottomSpace}
+              />
             </ScrollView>
 
-            {/* Modal Footer */}
+            {/* Footer */}
             <View style={styles.modalFooter}>
-
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={closeModal}
+                disabled={saving}
+                activeOpacity={0.8}
               >
-                <Text style={styles.cancelButtonText}>
+                <Text
+                  style={
+                    styles.cancelButtonText
+                  }
+                >
                   Cancel
                 </Text>
               </TouchableOpacity>
@@ -524,151 +967,302 @@ const SendersListScreen = () => {
               <TouchableOpacity
                 style={styles.saveButton}
                 onPress={saveSender}
+                disabled={saving}
+                activeOpacity={0.8}
               >
-                <Ionicons
-                  name="save-outline"
-                  size={19}
-                  color="#fff"
-                />
+                {saving ? (
+                  <ActivityIndicator
+                    size="small"
+                    color="#FFFFFF"
+                  />
+                ) : (
+                  <>
+                    <Text
+                      style={
+                        styles.saveButtonText
+                      }
+                    >
+                      {editing
+                        ? 'Save Changes'
+                        : 'Create Sender'}
+                    </Text>
 
-                <Text style={styles.saveButtonText}>
-                  Save
-                </Text>
+                    <Ionicons
+                      name="arrow-forward"
+                      size={18}
+                      color="#FFFFFF"
+                      style={
+                        styles.saveArrow
+                      }
+                    />
+                  </>
+                )}
               </TouchableOpacity>
-
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
-    </View>
+    </SafeAreaView>
   )
 }
 
-export const styles = StyleSheet.create({
+/* -------------------------------------------------------------------------- */
+/* Styles                                                                     */
+/* -------------------------------------------------------------------------- */
+
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor:
+      theme.colors.background,
+  },
+
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
+    backgroundColor:
+      theme.colors.background,
+    paddingHorizontal: 20,
   },
+
+  /* ---------------------------------------------------------------------- */
+  /* Header                                                                  */
+  /* ---------------------------------------------------------------------- */
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: theme.spacing.xxl,
-    paddingTop: theme.spacing.xxl,
-    paddingBottom: theme.spacing.lg,
+    paddingTop: 18,
+    paddingBottom: 20,
+  },
+
+  headerText: {
+    flex: 1,
+    paddingRight: 15,
+  },
+
+  eyebrow: {
+    color: theme.colors.primary,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    marginBottom: 5,
   },
 
   title: {
-    fontSize: 24,
-    fontWeight: '700',
     color: theme.colors.text,
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+  },
+
+  subtitle: {
+    color: theme.colors.textSecondary,
+    fontSize: 13,
+    marginTop: 5,
   },
 
   addButton: {
+    height: 46,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: theme.radius.sm,
-    ...theme.shadows.button,
+    justifyContent: 'center',
+    paddingHorizontal: 13,
+    borderRadius: 14,
+    backgroundColor:
+      theme.colors.primary,
+
+    shadowColor:
+      theme.colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+
+  addIconContainer: {
+    width: 23,
+    height: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 5,
   },
 
   addButtonText: {
-    color: theme.colors.background, // High-contrast text on bright primary
-    fontSize: 14,
-    fontWeight: '600',
-    marginLeft: 5,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
 
+  /* ---------------------------------------------------------------------- */
+  /* Search                                                                  */
+  /* ---------------------------------------------------------------------- */
+
   searchContainer: {
+    height: 52,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: theme.colors.surface,
-    marginHorizontal: theme.spacing.xxl,
-    marginBottom: theme.spacing.lg,
-    borderRadius: theme.radius.sm,
+    backgroundColor:
+      theme.colors.surface,
     borderWidth: 1,
-    borderColor: theme.colors.border,
-    height: 46,
+    borderColor:
+      theme.colors.border,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    marginBottom: 18,
+
+    shadowColor: '#000000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.04,
+    shadowRadius: 7,
+    elevation: 1,
   },
 
   searchIcon: {
-    marginLeft: 13,
+    marginRight: 8,
   },
 
   searchInput: {
     flex: 1,
     height: '100%',
-    paddingHorizontal: 10,
     color: theme.colors.text,
-    fontSize: 15,
+    fontSize: 14,
   },
 
   clearSearch: {
-    paddingHorizontal: 12,
+    paddingLeft: 8,
+    paddingVertical: 5,
   },
+
+  /* ---------------------------------------------------------------------- */
+  /* Results Header                                                          */
+  /* ---------------------------------------------------------------------- */
+
+  resultsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+
+  resultsTitle: {
+    color: theme.colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  countBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor:
+      theme.colors.border,
+  },
+
+  countText: {
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  /* ---------------------------------------------------------------------- */
+  /* List                                                                    */
+  /* ---------------------------------------------------------------------- */
 
   listContent: {
-    paddingHorizontal: theme.spacing.xxl,
-    paddingBottom: theme.spacing.huge,
+    paddingTop: 2,
+    paddingBottom: 35,
   },
 
+  emptyList: {
+    flexGrow: 1,
+  },
+
+  /* ---------------------------------------------------------------------- */
+  /* Card                                                                    */
+  /* ---------------------------------------------------------------------- */
+
   senderCard: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radius.md,
-    marginBottom: theme.spacing.lg,
-    padding: theme.spacing.xl,
+    backgroundColor:
+      theme.colors.surface,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: theme.colors.borderLight,
-    ...theme.shadows.card,
+    borderColor:
+      theme.colors.border,
+    padding: 17,
+    marginBottom: 12,
+
+    shadowColor: '#000000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.055,
+    shadowRadius: 12,
+    elevation: 2,
   },
 
   senderHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-
-  senderTitleContainer: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
   },
 
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: theme.radius.round,
-    backgroundColor: theme.colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    justifyContent: 'center',
+    width: 48,
+    height: 48,
+    borderRadius: 16,
     alignItems: 'center',
+    justifyContent: 'center',
   },
 
   avatarText: {
-    color: theme.colors.cyan,
-    fontSize: 18,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
   },
 
-  senderTitle: {
-    marginLeft: 11,
+  senderIdentity: {
     flex: 1,
+    marginLeft: 13,
+    paddingRight: 8,
   },
 
   senderName: {
-    fontSize: 16,
-    fontWeight: '700',
     color: theme.colors.text,
+    fontSize: 16,
+    fontWeight: '800',
   },
 
-  senderPhone: {
-    marginTop: 3,
-    fontSize: 13,
+  countryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 5,
+  },
+
+  countryDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor:
+      theme.colors.primary,
+    marginRight: 6,
+  },
+
+  countryText: {
+    flex: 1,
     color: theme.colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '600',
   },
 
   actionContainer: {
@@ -677,47 +1271,83 @@ export const styles = StyleSheet.create({
   },
 
   editButton: {
-    width: 38,
-    height: 38,
-    borderRadius: theme.radius.xs,
-    backgroundColor: theme.colors.warningLight,
+    width: 36,
+    height: 36,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 7,
+    backgroundColor:
+      'rgba(217,119,6,0.10)',
+    borderWidth: 1,
+    borderColor:
+      'rgba(217,119,6,0.18)',
+    marginLeft: 5,
   },
 
   deleteButton: {
-    width: 38,
-    height: 38,
-    borderRadius: theme.radius.xs,
-    backgroundColor: theme.colors.dangerLight,
+    width: 36,
+    height: 36,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor:
+      'rgba(231,76,60,0.08)',
+    borderWidth: 1,
+    borderColor:
+      'rgba(231,76,60,0.15)',
+    marginLeft: 6,
   },
 
   divider: {
     height: 1,
-    backgroundColor: theme.colors.divider,
-    marginVertical: 13,
+    backgroundColor:
+      theme.colors.divider,
+    marginVertical: 15,
   },
 
-  infoRow: {
-    marginBottom: 9,
+  details: {
+    gap: 12,
   },
 
-  infoLabel: {
-    fontSize: 11,
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  detailIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    marginRight: 10,
+  },
+
+  detailContent: {
+    flex: 1,
+  },
+
+  detailLabel: {
     color: theme.colors.textSecondary,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: '700',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
     marginBottom: 2,
   },
 
-  infoValue: {
-    fontSize: 14,
+  detailValue: {
     color: theme.colors.text,
-    lineHeight: 20,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
   },
+
+  /* ---------------------------------------------------------------------- */
+  /* Loading                                                                 */
+  /* ---------------------------------------------------------------------- */
 
   loadingContainer: {
     flex: 1,
@@ -725,152 +1355,329 @@ export const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  loadingText: {
-    marginTop: 10,
-    fontSize: 14,
-    color: theme.colors.textSecondary,
+  loadingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor:
+      theme.colors.surface,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor:
+      theme.colors.border,
   },
 
-  emptyList: {
-    flexGrow: 1,
+  loadingText: {
+    color: theme.colors.textSecondary,
+    marginLeft: 10,
+    fontSize: 13,
+    fontWeight: '600',
   },
+
+  /* ---------------------------------------------------------------------- */
+  /* Empty                                                                   */
+  /* ---------------------------------------------------------------------- */
 
   emptyContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 30,
+    paddingBottom: 50,
+  },
+
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor:
+      theme.colors.border,
+    marginBottom: 18,
   },
 
   emptyTitle: {
-    marginTop: 12,
-    fontSize: 17,
-    fontWeight: '600',
     color: theme.colors.text,
-  },
-
-  emptyText: {
-    marginTop: 5,
-    fontSize: 14,
-    color: theme.colors.textSecondary,
+    fontSize: 18,
+    fontWeight: '800',
     textAlign: 'center',
   },
 
+  emptyText: {
+    color: theme.colors.textSecondary,
+    fontSize: 13,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 8,
+    maxWidth: 300,
+  },
+
+  emptyButton: {
+    height: 44,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 13,
+    backgroundColor:
+      theme.colors.primary,
+    marginTop: 20,
+  },
+
+  emptyButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+    marginLeft: 6,
+  },
+
+  /* ---------------------------------------------------------------------- */
+  /* Modal                                                                   */
+  /* ---------------------------------------------------------------------- */
+
   modalOverlay: {
     flex: 1,
-    backgroundColor: theme.colors.overlayDark,
     justifyContent: 'flex-end',
+    backgroundColor:
+      'rgba(15,23,42,0.58)',
   },
 
   modalContainer: {
-    backgroundColor: theme.colors.backgroundSecondary,
-    borderTopLeftRadius: theme.radius.xl,
-    borderTopRightRadius: theme.radius.xl,
-    maxHeight: '92%',
-    minHeight: '55%',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
+    maxHeight: '94%',
+    backgroundColor:
+      theme.colors.surface,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
+  },
+
+  dragHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    backgroundColor:
+      theme.colors.border,
+    marginTop: 9,
+    marginBottom: 3,
   },
 
   modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 17,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.divider,
+    borderBottomColor:
+      theme.colors.divider,
+  },
+
+  modalTitleArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  modalIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor:
+      theme.colors.primary,
+    marginRight: 12,
+  },
+
+  modalTitleText: {
+    flex: 1,
   },
 
   modalTitle: {
-    fontSize: 19,
-    fontWeight: '700',
     color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+
+  modalSubtitle: {
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+    marginTop: 3,
   },
 
   closeButton: {
-    padding: 2,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    marginLeft: 10,
   },
 
   modalBody: {
-    paddingHorizontal: 18,
-    paddingTop: 16,
+    flexGrow: 0,
+  },
+
+  modalBodyContent: {
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 5,
+  },
+
+  sectionLabel: {
+    color: theme.colors.textSecondary,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    marginBottom: 13,
+  },
+
+  businessSection: {
+    marginTop: 2,
   },
 
   inputContainer: {
-    marginBottom: 16,
+    marginBottom: 17,
   },
 
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.text,
+  inputLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 7,
   },
 
-  input: {
-    height: 46,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.sm,
-    paddingHorizontal: 12,
-    fontSize: 15,
+  inputLabel: {
     color: theme.colors.text,
-    backgroundColor: theme.colors.surface,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  required: {
+    color: theme.colors.danger,
+    fontSize: 13,
+    marginLeft: 3,
+  },
+
+  inputWrapper: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor:
+      theme.colors.border,
+    borderRadius: 14,
+    paddingHorizontal: 13,
+  },
+
+  inputWrapperMultiline: {
+    alignItems: 'flex-start',
+    minHeight: 105,
+  },
+
+  inputIcon: {
+    marginRight: 9,
+  },
+
+  inputIconMultiline: {
+    marginTop: 13,
+  },
+
+  input: {
+    flex: 1,
+    minHeight: 48,
+    color: theme.colors.text,
+    fontSize: 14,
+    paddingVertical: 0,
   },
 
   textarea: {
-    height: 95,
-    paddingTop: 11,
+    minHeight: 100,
+    paddingTop: 12,
+    paddingBottom: 12,
   },
 
   bottomSpace: {
-    height: 20,
+    height: 5,
   },
+
+  /* ---------------------------------------------------------------------- */
+  /* Modal Footer                                                            */
+  /* ---------------------------------------------------------------------- */
 
   modalFooter: {
     flexDirection: 'row',
-    padding: 16,
+    paddingHorizontal: 20,
+    paddingTop: 13,
+    paddingBottom:
+      Platform.OS === 'ios' ? 25 : 17,
     borderTopWidth: 1,
-    borderTopColor: theme.colors.divider,
-    backgroundColor: theme.colors.surface,
+    borderTopColor:
+      theme.colors.divider,
+    backgroundColor:
+      theme.colors.surface,
+    gap: 10,
   },
 
   cancelButton: {
-    flex: 1,
-    height: 46,
-    borderRadius: theme.radius.sm,
-    borderWidth: 1,
-    borderColor: theme.colors.textDisabled,
+    flex: 0.85,
+    height: 50,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    borderWidth: 1,
+    borderColor:
+      theme.colors.border,
   },
 
   cancelButtonText: {
-    color: theme.colors.textSecondary,
-    fontSize: 15,
-    fontWeight: '600',
+    color: theme.colors.text,
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   saveButton: {
-    flex: 1,
-    height: 46,
-    borderRadius: theme.radius.sm,
-    backgroundColor: theme.colors.primary,
+    flex: 1.5,
+    height: 50,
+    borderRadius: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
-    ...theme.shadows.button,
+    backgroundColor:
+      theme.colors.primary,
+
+    shadowColor:
+      theme.colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.20,
+    shadowRadius: 9,
+    elevation: 4,
   },
 
   saveButtonText: {
-    color: theme.colors.background,
-    fontSize: 15,
-    fontWeight: '600',
-    marginLeft: 7,
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
-});
+
+  saveArrow: {
+    marginLeft: 8,
+  },
+})
 
 export default SendersListScreen

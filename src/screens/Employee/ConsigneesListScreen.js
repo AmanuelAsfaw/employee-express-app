@@ -1,8 +1,14 @@
 // src/screens/Employee/ConsigneesListScreen.js
-import React, { useCallback, useEffect, useState } from 'react'
+
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react'
+
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -25,6 +31,7 @@ import {
 } from '../../utils/employe_api_utils'
 
 import { theme } from '../../theme/theme'
+import { Alert } from '../../components/Alert'
 
 const emptyForm = {
   name: '',
@@ -33,6 +40,51 @@ const emptyForm = {
   tin_number: '',
   country: '',
 }
+
+/* -------------------------------------------------------------------------- */
+/* Helpers                                                                    */
+/* -------------------------------------------------------------------------- */
+
+const getInitials = (name = '') => {
+  const words = name.trim().split(/\s+/).filter(Boolean)
+
+  if (words.length === 0) {
+    return '?'
+  }
+
+  if (words.length === 1) {
+    return words[0].charAt(0).toUpperCase()
+  }
+
+  return (
+    words[0].charAt(0) +
+    words[words.length - 1].charAt(0)
+  ).toUpperCase()
+}
+
+const getAvatarColor = (name = '') => {
+  const colors = [
+    '#2563EB',
+    '#7C3AED',
+    '#0891B2',
+    '#059669',
+    '#D97706',
+    '#DB2777',
+    '#4F46E5',
+  ]
+
+  let hash = 0
+
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+
+  return colors[Math.abs(hash) % colors.length]
+}
+
+/* -------------------------------------------------------------------------- */
+/* Main Screen                                                                */
+/* -------------------------------------------------------------------------- */
 
 const ConsigneesListScreen = () => {
   const [consignees, setConsignees] = useState([])
@@ -48,11 +100,16 @@ const ConsigneesListScreen = () => {
   const [formData, setFormData] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
 
+  /* ------------------------------------------------------------------------ */
+  /* API                                                                      */
+  /* ------------------------------------------------------------------------ */
+
   const loadConsignees = useCallback(async () => {
     try {
       setLoading(true)
 
       const data = await getConsigneesAPI(search)
+
       setConsignees(data)
     } catch (error) {
       console.error('Error loading consignees:', error)
@@ -74,7 +131,8 @@ const ConsigneesListScreen = () => {
     try {
       setRefreshing(true)
 
-      const data = await getConsignees(search)
+      const data = await getConsigneesAPI(search)
+
       setConsignees(data)
     } catch (error) {
       console.error('Refresh error:', error)
@@ -87,6 +145,10 @@ const ConsigneesListScreen = () => {
       setRefreshing(false)
     }
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Modal                                                                    */
+  /* ------------------------------------------------------------------------ */
 
   const openCreate = () => {
     setEditing(false)
@@ -126,12 +188,17 @@ const ConsigneesListScreen = () => {
     }))
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Save                                                                     */
+  /* ------------------------------------------------------------------------ */
+
   const saveConsignee = async () => {
     if (!formData.name.trim()) {
       Alert.alert(
         'Validation',
         'Please enter the consignee name.'
       )
+
       return
     }
 
@@ -153,7 +220,10 @@ const ConsigneesListScreen = () => {
 
       await loadConsignees()
     } catch (error) {
-      console.error('Save consignee error:', error)
+      console.error(
+        'Save consignee error:',
+        error
+      )
 
       const message =
         error?.response?.data?.detail ||
@@ -164,6 +234,10 @@ const ConsigneesListScreen = () => {
       setSaving(false)
     }
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Delete                                                                   */
+  /* ------------------------------------------------------------------------ */
 
   const confirmDelete = (consignee) => {
     Alert.alert(
@@ -206,119 +280,184 @@ const ConsigneesListScreen = () => {
     }
   }
 
+  /* ------------------------------------------------------------------------ */
+  /* Derived                                                                  */
+  /* ------------------------------------------------------------------------ */
+
+  const resultText = useMemo(() => {
+    if (loading) return ''
+
+    if (consignees.length === 1) {
+      return '1 consignee'
+    }
+
+    return `${consignees.length} consignees`
+  }, [consignees.length, loading])
+
+  /* ------------------------------------------------------------------------ */
+  /* Card                                                                     */
+  /* ------------------------------------------------------------------------ */
+
   const renderConsignee = ({ item }) => {
+    const initials = getInitials(item.name)
+    const avatarColor = getAvatarColor(item.name)
+
     return (
       <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <View style={styles.nameContainer}>
+        {/* Top section */}
+        <View style={styles.cardTop}>
+          <View
+            style={[
+              styles.avatar,
+              {
+                backgroundColor: avatarColor,
+              },
+            ]}
+          >
+            <Text style={styles.avatarText}>
+              {initials}
+            </Text>
+          </View>
+
+          <View style={styles.identity}>
             <Text
               style={styles.consigneeName}
               numberOfLines={1}
             >
-              {item.name || '-'}
+              {item.name || 'Unnamed consignee'}
             </Text>
 
-            <Text style={styles.country}>
-              {item.country || '-'}
-            </Text>
+            <View style={styles.countryRow}>
+              <View style={styles.countryDot} />
+
+              <Text
+                style={styles.country}
+                numberOfLines={1}
+              >
+                {item.country || 'Country not specified'}
+              </Text>
+            </View>
           </View>
 
-          <View style={styles.actions}>
+          <View style={styles.cardActions}>
             <TouchableOpacity
-              style={[
-                styles.actionButton,
-                styles.editButton,
-              ]}
-              activeOpacity={0.8}
+              style={styles.iconButton}
+              activeOpacity={0.7}
               onPress={() => openEdit(item)}
             >
-              <Text style={styles.editButtonText}>
-                Edit
+              <Text style={styles.editIcon}>
+                ✎
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[
-                styles.actionButton,
-                styles.deleteButton,
+                styles.iconButton,
+                styles.deleteIconButton,
               ]}
-              activeOpacity={0.8}
+              activeOpacity={0.7}
               onPress={() => confirmDelete(item)}
             >
-              <Text style={styles.deleteButtonText}>
-                Delete
+              <Text style={styles.deleteIcon}>
+                ×
               </Text>
             </TouchableOpacity>
           </View>
         </View>
 
-        <View style={styles.divider} />
+        {/* Divider */}
+        <View style={styles.cardDivider} />
 
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>
-            Phone
-          </Text>
+        {/* Details */}
+        <View style={styles.details}>
+          <DetailRow
+            icon="☎"
+            label="Phone"
+            value={item.phone}
+          />
 
-          <Text style={styles.value}>
-            {item.phone || '-'}
-          </Text>
-        </View>
+          <DetailRow
+            icon="⌂"
+            label="Company / Address"
+            value={item.company_name_address}
+            multiline
+          />
 
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>
-            Company / Address
-          </Text>
-
-          <Text
-            style={styles.value}
-            numberOfLines={3}
-          >
-            {item.company_name_address || '-'}
-          </Text>
-        </View>
-
-        <View style={styles.infoRow}>
-          <Text style={styles.label}>
-            TIN
-          </Text>
-
-          <Text style={styles.value}>
-            {item.tin_number || '-'}
-          </Text>
+          <DetailRow
+            icon="#"
+            label="TIN Number"
+            value={item.tin_number}
+            last
+          />
         </View>
       </View>
     )
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Empty                                                                    */
+  /* ------------------------------------------------------------------------ */
 
   const renderEmpty = () => {
     if (loading) return null
 
+    const hasSearch = search.trim().length > 0
+
     return (
       <View style={styles.emptyContainer}>
+        <View style={styles.emptyIcon}>
+          <Text style={styles.emptyIconText}>
+            {hasSearch ? '⌕' : '+'}
+          </Text>
+        </View>
+
         <Text style={styles.emptyTitle}>
-          No Consignees found
+          {hasSearch
+            ? 'No matching consignees'
+            : 'No consignees yet'}
         </Text>
 
         <Text style={styles.emptyText}>
-          Try changing your search or create a new
-          consignee.
+          {hasSearch
+            ? 'Try searching with another name, phone number, or company.'
+            : 'Add your first consignee to start managing your delivery contacts.'}
         </Text>
+
+        {!hasSearch && (
+          <TouchableOpacity
+            style={styles.emptyButton}
+            activeOpacity={0.8}
+            onPress={openCreate}
+          >
+            <Text style={styles.emptyButtonText}>
+              + Add Consignee
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
     )
   }
+
+  /* ------------------------------------------------------------------------ */
+  /* Render                                                                   */
+  /* ------------------------------------------------------------------------ */
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
         {/* Header */}
         <View style={styles.header}>
-          <View>
+          <View style={styles.headerText}>
+            <Text style={styles.eyebrow}>
+              DIRECTORY
+            </Text>
+
             <Text style={styles.title}>
               Consignees
             </Text>
 
             <Text style={styles.subtitle}>
-              Manage your consignees
+              Manage your delivery contacts
             </Text>
           </View>
 
@@ -327,9 +466,11 @@ const ConsigneesListScreen = () => {
             activeOpacity={0.8}
             onPress={openCreate}
           >
-            <Text style={styles.plus}>
-              +
-            </Text>
+            <View style={styles.newButtonIcon}>
+              <Text style={styles.plus}>
+                +
+              </Text>
+            </View>
 
             <Text style={styles.newButtonText}>
               New
@@ -338,31 +479,56 @@ const ConsigneesListScreen = () => {
         </View>
 
         {/* Search */}
-        <View style={styles.searchContainer}>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search consignee..."
-            placeholderTextColor={
-              theme.colors.textSecondary
-            }
-            value={search}
-            onChangeText={setSearch}
-            autoCapitalize="none"
-            clearButtonMode="while-editing"
-          />
+        <View style={styles.searchWrapper}>
+          <View style={styles.searchContainer}>
+            <Text style={styles.searchIcon}>
+              ⌕
+            </Text>
+
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by name, phone or company"
+              placeholderTextColor={
+                theme.colors.textSecondary
+              }
+              value={search}
+              onChangeText={setSearch}
+              autoCapitalize="none"
+              autoCorrect={false}
+              clearButtonMode="while-editing"
+              returnKeyType="search"
+            />
+          </View>
+        </View>
+
+        {/* Results heading */}
+        <View style={styles.resultsHeader}>
+          <Text style={styles.resultsTitle}>
+            Your consignees
+          </Text>
+
+          {!!resultText && (
+            <View style={styles.countBadge}>
+              <Text style={styles.countText}>
+                {resultText}
+              </Text>
+            </View>
+          )}
         </View>
 
         {/* Loading */}
         {loading && consignees.length === 0 ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator
-              size="large"
-              color={theme.colors.primary}
-            />
+            <View style={styles.loadingCard}>
+              <ActivityIndicator
+                size="small"
+                color={theme.colors.primary}
+              />
 
-            <Text style={styles.loadingText}>
-              Loading consignees...
-            </Text>
+              <Text style={styles.loadingText}>
+                Loading consignees...
+              </Text>
+            </View>
           </View>
         ) : (
           <FlatList
@@ -386,46 +552,66 @@ const ConsigneesListScreen = () => {
               />
             }
             showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={10}
           />
         )}
       </View>
 
-      {/* Create / Edit Modal */}
+      {/* ------------------------------------------------------------------ */}
+      {/* Create / Edit Modal                                                 */}
+      {/* ------------------------------------------------------------------ */}
+
       <Modal
         visible={modalVisible}
         animationType="slide"
         transparent
         onRequestClose={closeModal}
+        statusBarTranslucent
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
           behavior={
             Platform.OS === 'ios'
               ? 'padding'
-              : undefined
+              : 'height'
           }
         >
           <View style={styles.modalContainer}>
-            {/* Modal Header */}
-            <View style={styles.modalHeader}>
-              <View>
-                <Text style={styles.modalTitle}>
-                  {editing
-                    ? 'Edit Consignee'
-                    : 'New Consignee'}
-                </Text>
+            {/* Drag handle */}
+            <View style={styles.dragHandle} />
 
-                <Text style={styles.modalSubtitle}>
-                  {editing
-                    ? 'Update consignee information'
-                    : 'Add a new consignee'}
-                </Text>
+            {/* Modal header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.modalTitleArea}>
+                <View style={styles.modalIcon}>
+                  <Text style={styles.modalIconText}>
+                    {editing ? '✎' : '+'}
+                  </Text>
+                </View>
+
+                <View style={styles.modalTitleText}>
+                  <Text style={styles.modalTitle}>
+                    {editing
+                      ? 'Edit Consignee'
+                      : 'New Consignee'}
+                  </Text>
+
+                  <Text style={styles.modalSubtitle}>
+                    {editing
+                      ? 'Update contact information'
+                      : 'Add a new delivery contact'}
+                  </Text>
+                </View>
               </View>
 
               <TouchableOpacity
                 style={styles.closeButton}
                 onPress={closeModal}
                 disabled={saving}
+                activeOpacity={0.7}
               >
                 <Text style={styles.closeButtonText}>
                   ×
@@ -433,32 +619,53 @@ const ConsigneesListScreen = () => {
               </TouchableOpacity>
             </View>
 
+            {/* Form */}
             <ScrollView
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               contentContainerStyle={
                 styles.modalBody
               }
+              keyboardDismissMode="interactive"
             >
+              <Text style={styles.sectionLabel}>
+                BASIC INFORMATION
+              </Text>
+
               <InputField
                 label="Consignee Name"
                 value={formData.name}
                 onChangeText={(value) =>
                   updateField('name', value)
                 }
-                placeholder="Enter consignee name"
+                placeholder="e.g. Abebe Kebede"
                 required
+                autoCapitalize="words"
               />
 
               <InputField
-                label="Phone"
+                label="Phone Number"
                 value={formData.phone}
                 onChangeText={(value) =>
                   updateField('phone', value)
                 }
-                placeholder="Enter phone number"
+                placeholder="e.g. +251 91 234 5678"
                 keyboardType="phone-pad"
               />
+
+              <InputField
+                label="Country"
+                value={formData.country}
+                onChangeText={(value) =>
+                  updateField('country', value)
+                }
+                placeholder="e.g. Ethiopia"
+                autoCapitalize="words"
+              />
+
+              <Text style={styles.sectionLabel}>
+                BUSINESS DETAILS
+              </Text>
 
               <InputField
                 label="Company / Address"
@@ -471,7 +678,7 @@ const ConsigneesListScreen = () => {
                     value
                   )
                 }
-                placeholder="Enter company name or address"
+                placeholder="Enter company name or full address"
                 multiline
                 numberOfLines={4}
               />
@@ -488,28 +695,16 @@ const ConsigneesListScreen = () => {
                 placeholder="Enter TIN number"
               />
 
-              <InputField
-                label="Country"
-                value={formData.country}
-                onChangeText={(value) =>
-                  updateField(
-                    'country',
-                    value
-                  )
-                }
-                placeholder="Enter country"
-              />
+              <View style={styles.formBottomSpace} />
             </ScrollView>
 
-            {/* Modal Footer */}
+            {/* Footer */}
             <View style={styles.modalFooter}>
               <TouchableOpacity
-                style={[
-                  styles.footerButton,
-                  styles.cancelButton,
-                ]}
+                style={styles.cancelButton}
                 onPress={closeModal}
                 disabled={saving}
+                activeOpacity={0.8}
               >
                 <Text style={styles.cancelButtonText}>
                   Cancel
@@ -517,24 +712,28 @@ const ConsigneesListScreen = () => {
               </TouchableOpacity>
 
               <TouchableOpacity
-                style={[
-                  styles.footerButton,
-                  styles.saveButton,
-                ]}
+                style={styles.saveButton}
                 onPress={saveConsignee}
                 disabled={saving}
+                activeOpacity={0.8}
               >
                 {saving ? (
                   <ActivityIndicator
-                    color={theme.colors.background}
+                    color="#FFFFFF"
                     size="small"
                   />
                 ) : (
-                  <Text style={styles.saveButtonText}>
-                    {editing
-                      ? 'Update'
-                      : 'Save'}
-                  </Text>
+                  <>
+                    <Text style={styles.saveButtonText}>
+                      {editing
+                        ? 'Save Changes'
+                        : 'Create Consignee'}
+                    </Text>
+
+                    <Text style={styles.saveArrow}>
+                      →
+                    </Text>
+                  </>
                 )}
               </TouchableOpacity>
             </View>
@@ -545,9 +744,50 @@ const ConsigneesListScreen = () => {
   )
 }
 
-/**
- * Reusable input component
- */
+/* -------------------------------------------------------------------------- */
+/* Detail Row                                                                 */
+/* -------------------------------------------------------------------------- */
+
+const DetailRow = ({
+  icon,
+  label,
+  value,
+  multiline = false,
+  last = false,
+}) => {
+  return (
+    <View
+      style={[
+        styles.detailRow,
+        last && styles.detailRowLast,
+      ]}
+    >
+      <View style={styles.detailIcon}>
+        <Text style={styles.detailIconText}>
+          {icon}
+        </Text>
+      </View>
+
+      <View style={styles.detailContent}>
+        <Text style={styles.detailLabel}>
+          {label}
+        </Text>
+
+        <Text
+          style={styles.detailValue}
+          numberOfLines={multiline ? 2 : 1}
+        >
+          {value || 'Not provided'}
+        </Text>
+      </View>
+    </View>
+  )
+}
+
+/* -------------------------------------------------------------------------- */
+/* Input Field                                                                */
+/* -------------------------------------------------------------------------- */
+
 const InputField = ({
   label,
   value,
@@ -557,6 +797,7 @@ const InputField = ({
   numberOfLines = 1,
   keyboardType = 'default',
   required = false,
+  autoCapitalize = 'sentences',
 }) => {
   return (
     <View style={styles.inputGroup}>
@@ -585,6 +826,7 @@ const InputField = ({
         multiline={multiline}
         numberOfLines={numberOfLines}
         keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
         textAlignVertical={
           multiline ? 'top' : 'center'
         }
@@ -592,6 +834,10 @@ const InputField = ({
     </View>
   )
 }
+
+/* -------------------------------------------------------------------------- */
+/* Styles                                                                     */
+/* -------------------------------------------------------------------------- */
 
 const styles = StyleSheet.create({
   safeArea: {
@@ -602,305 +848,560 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,
-    paddingHorizontal: theme.spacing.xxl,
+    paddingHorizontal: 20,
   },
 
-  /* Header */
+  /* ---------------------------------------------------------------------- */
+  /* Header                                                                  */
+  /* ---------------------------------------------------------------------- */
 
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: theme.spacing.xxl,
-    paddingBottom: theme.spacing.xl,
+    paddingTop: 18,
+    paddingBottom: 20,
+  },
+
+  headerText: {
+    flex: 1,
+    paddingRight: 16,
+  },
+
+  eyebrow: {
+    color: theme.colors.primary,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    marginBottom: 5,
   },
 
   title: {
     color: theme.colors.text,
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 28,
+    lineHeight: 32,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
 
   subtitle: {
     color: theme.colors.textSecondary,
     fontSize: 13,
-    marginTop: 4,
+    marginTop: 5,
   },
 
   newButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    height: 46,
+    paddingHorizontal: 14,
+    borderRadius: 14,
     backgroundColor: theme.colors.primary,
-    paddingHorizontal: 15,
-    height: 44,
-    borderRadius: theme.radius.md,
+
+    shadowColor: theme.colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.22,
+    shadowRadius: 10,
+    elevation: 5,
+  },
+
+  newButtonIcon: {
+    width: 23,
+    height: 23,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 6,
   },
 
   plus: {
-    color: theme.colors.background,
+    color: '#FFFFFF',
     fontSize: 23,
-    fontWeight: '600',
-    marginRight: 6,
+    fontWeight: '500',
     lineHeight: 24,
   },
 
   newButtonText: {
-    color: theme.colors.background,
-    fontSize: 14,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
   },
 
-  /* Search */
+  /* ---------------------------------------------------------------------- */
+  /* Search                                                                  */
+  /* ---------------------------------------------------------------------- */
+
+  searchWrapper: {
+    marginBottom: 18,
+  },
 
   searchContainer: {
-    marginBottom: theme.spacing.lg,
+    height: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor:
+      theme.colors.surface,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: 16,
+    paddingHorizontal: 15,
+
+    shadowColor: '#000000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 1,
+  },
+
+  searchIcon: {
+    color: theme.colors.primary,
+    fontSize: 23,
+    width: 30,
+    textAlign: 'center',
+    marginRight: 5,
   },
 
   searchInput: {
-    height: 48,
-    backgroundColor:
-      theme.colors.surfaceSecondary,
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
-    paddingHorizontal: 15,
+    flex: 1,
+    height: '100%',
     color: theme.colors.text,
     fontSize: 14,
   },
 
-  /* List */
+  /* ---------------------------------------------------------------------- */
+  /* Results Header                                                          */
+  /* ---------------------------------------------------------------------- */
+
+  resultsHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+
+  resultsTitle: {
+    color: theme.colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  countBadge: {
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+
+  countText: {
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+
+  /* ---------------------------------------------------------------------- */
+  /* List                                                                    */
+  /* ---------------------------------------------------------------------- */
 
   listContent: {
-    paddingTop: 4,
-    paddingBottom: 30,
+    paddingTop: 2,
+    paddingBottom: 35,
   },
 
   emptyList: {
     flexGrow: 1,
   },
 
-  /* Card */
+  /* ---------------------------------------------------------------------- */
+  /* Card                                                                    */
+  /* ---------------------------------------------------------------------- */
 
   card: {
     backgroundColor: theme.colors.surface,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    borderRadius: theme.radius.lg,
-    padding: theme.spacing.xl,
-    marginBottom: theme.spacing.lg,
+    padding: 17,
+    marginBottom: 12,
 
-    shadowColor: theme.shadows.card.shadowColor,
-    shadowOffset:
-      theme.shadows.card.shadowOffset,
-    shadowOpacity:
-      theme.shadows.card.shadowOpacity,
-    shadowRadius:
-      theme.shadows.card.shadowRadius,
-    elevation: theme.shadows.card.elevation,
+    shadowColor: '#000000',
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+    shadowOpacity: 0.055,
+    shadowRadius: 12,
+    elevation: 2,
   },
 
-  cardHeader: {
+  cardTop: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
+    alignItems: 'center',
   },
 
-  nameContainer: {
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  avatarText: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+
+  identity: {
     flex: 1,
-    paddingRight: 10,
+    marginLeft: 13,
+    paddingRight: 8,
   },
 
   consigneeName: {
     color: theme.colors.text,
-    fontSize: 17,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '800',
   },
 
-  country: {
-    color: theme.colors.primary,
-    fontSize: 12,
+  countryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: 5,
   },
 
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  countryDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: theme.colors.primary,
+    marginRight: 6,
   },
 
-  actionButton: {
-    minWidth: 58,
-    height: 34,
-    paddingHorizontal: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: theme.radius.sm,
-    marginLeft: 6,
-  },
-
-  editButton: {
-    backgroundColor:
-      'rgba(217,119,6,0.15)',
-    borderWidth: 1,
-    borderColor: theme.colors.warning,
-  },
-
-  editButtonText: {
-    color: theme.colors.warning,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  deleteButton: {
-    backgroundColor:
-      'rgba(231,76,60,0.15)',
-    borderWidth: 1,
-    borderColor: theme.colors.danger,
-  },
-
-  deleteButtonText: {
-    color: theme.colors.danger,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  divider: {
-    height: 1,
-    backgroundColor: theme.colors.divider,
-    marginVertical: theme.spacing.lg,
-  },
-
-  infoRow: {
-    flexDirection: 'row',
-    marginBottom: 10,
-  },
-
-  label: {
-    width: 125,
+  country: {
+    flex: 1,
     color: theme.colors.textSecondary,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
 
-  value: {
-    flex: 1,
-    color: theme.colors.text,
-    fontSize: 13,
-    lineHeight: 19,
+  cardActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 
-  /* Loading */
+  iconButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor:
+      'rgba(217,119,6,0.10)',
+    borderWidth: 1,
+    borderColor:
+      'rgba(217,119,6,0.18)',
+    marginLeft: 6,
+  },
+
+  deleteIconButton: {
+    backgroundColor:
+      'rgba(231,76,60,0.08)',
+    borderColor:
+      'rgba(231,76,60,0.15)',
+  },
+
+  editIcon: {
+    color: theme.colors.warning,
+    fontSize: 19,
+    fontWeight: '600',
+  },
+
+  deleteIcon: {
+    color: theme.colors.danger,
+    fontSize: 24,
+    fontWeight: '300',
+    lineHeight: 22,
+  },
+
+  cardDivider: {
+    height: 1,
+    backgroundColor: theme.colors.divider,
+    marginVertical: 15,
+  },
+
+  details: {
+    gap: 12,
+  },
+
+  detailRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  detailRowLast: {
+    marginBottom: 0,
+  },
+
+  detailIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+
+  detailIconText: {
+    color: theme.colors.primary,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+
+  detailContent: {
+    flex: 1,
+  },
+
+  detailLabel: {
+    color: theme.colors.textSecondary,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 2,
+  },
+
+  detailValue: {
+    color: theme.colors.text,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+
+  /* ---------------------------------------------------------------------- */
+  /* Loading                                                                 */
+  /* ---------------------------------------------------------------------- */
 
   loadingContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  loadingCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.surface,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
   },
 
   loadingText: {
     color: theme.colors.textSecondary,
-    marginTop: 12,
-    fontSize: 14,
+    marginLeft: 10,
+    fontSize: 13,
+    fontWeight: '600',
   },
 
-  /* Empty */
+  /* ---------------------------------------------------------------------- */
+  /* Empty                                                                   */
+  /* ---------------------------------------------------------------------- */
 
   emptyContainer: {
     flex: 1,
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: 30,
+    paddingBottom: 50,
+  },
+
+  emptyIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 24,
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+  },
+
+  emptyIconText: {
+    color: theme.colors.primary,
+    fontSize: 30,
+    fontWeight: '300',
   },
 
   emptyTitle: {
     color: theme.colors.text,
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 8,
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
   },
 
   emptyText: {
     color: theme.colors.textSecondary,
     fontSize: 13,
-    textAlign: 'center',
     lineHeight: 20,
+    textAlign: 'center',
+    marginTop: 8,
+    maxWidth: 300,
   },
 
-  /* Modal */
-
-  modalOverlay: {
-    flex: 1,
-    backgroundColor:
-      theme.colors.overlayDark,
-    justifyContent: 'flex-end',
-  },
-
-  modalContainer: {
-    backgroundColor: theme.colors.surface,
-    borderTopLeftRadius: theme.radius.xxl,
-    borderTopRightRadius: theme.radius.xxl,
-    maxHeight: '92%',
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-  },
-
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: theme.spacing.xxl,
-    paddingTop: theme.spacing.xxl,
-    paddingBottom: theme.spacing.xl,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.divider,
-  },
-
-  modalTitle: {
-    color: theme.colors.text,
-    fontSize: 20,
-    fontWeight: '700',
-  },
-
-  modalSubtitle: {
-    color: theme.colors.textSecondary,
-    fontSize: 12,
-    marginTop: 4,
-  },
-
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor:
-      theme.colors.overlayLight,
+  emptyButton: {
+    marginTop: 20,
+    height: 44,
+    paddingHorizontal: 18,
+    borderRadius: 13,
+    backgroundColor: theme.colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
 
+  emptyButtonText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  /* ---------------------------------------------------------------------- */
+  /* Modal                                                                   */
+  /* ---------------------------------------------------------------------- */
+
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor:
+      'rgba(15,23,42,0.58)',
+  },
+
+  modalContainer: {
+    maxHeight: '94%',
+    backgroundColor: theme.colors.surface,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    overflow: 'hidden',
+  },
+
+  dragHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor:
+      theme.colors.border,
+    alignSelf: 'center',
+    marginTop: 9,
+    marginBottom: 3,
+  },
+
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 17,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.divider,
+  },
+
+  modalTitleArea: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  modalIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    backgroundColor:
+      theme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+
+  modalIconText: {
+    color: '#FFFFFF',
+    fontSize: 21,
+    fontWeight: '600',
+  },
+
+  modalTitleText: {
+    flex: 1,
+  },
+
+  modalTitle: {
+    color: theme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
+  },
+
+  modalSubtitle: {
+    color: theme.colors.textSecondary,
+    fontSize: 11,
+    marginTop: 3,
+  },
+
+  closeButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    backgroundColor:
+      theme.colors.surfaceSecondary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 10,
+  },
+
   closeButtonText: {
     color: theme.colors.text,
-    fontSize: 26,
+    fontSize: 25,
     fontWeight: '300',
-    lineHeight: 28,
+    lineHeight: 26,
   },
 
   modalBody: {
-    paddingHorizontal: theme.spacing.xxl,
-    paddingTop: theme.spacing.xxl,
-    paddingBottom: 10,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 5,
   },
 
-  /* Form */
+  sectionLabel: {
+    color: theme.colors.textSecondary,
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1.1,
+    marginBottom: 13,
+    marginTop: 2,
+  },
 
   inputGroup: {
-    marginBottom: theme.spacing.xl,
+    marginBottom: 17,
   },
 
   inputLabel: {
     color: theme.colors.text,
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 8,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 7,
   },
 
   required: {
@@ -908,61 +1409,91 @@ const styles = StyleSheet.create({
   },
 
   input: {
-    minHeight: 48,
+    minHeight: 49,
     backgroundColor:
       theme.colors.surfaceSecondary,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    borderRadius: theme.radius.md,
+    borderRadius: 14,
     paddingHorizontal: 14,
     color: theme.colors.text,
     fontSize: 14,
   },
 
   textArea: {
-    minHeight: 105,
+    minHeight: 100,
     paddingTop: 13,
+    paddingBottom: 13,
   },
 
-  /* Modal footer */
+  formBottomSpace: {
+    height: 5,
+  },
+
+  /* ---------------------------------------------------------------------- */
+  /* Modal Footer                                                            */
+  /* ---------------------------------------------------------------------- */
 
   modalFooter: {
     flexDirection: 'row',
-    padding: theme.spacing.xxl,
+    paddingHorizontal: 20,
+    paddingTop: 13,
+    paddingBottom:
+      Platform.OS === 'ios' ? 25 : 17,
     borderTopWidth: 1,
     borderTopColor: theme.colors.divider,
+    backgroundColor: theme.colors.surface,
     gap: 10,
   },
 
-  footerButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: theme.radius.md,
+  cancelButton: {
+    flex: 0.85,
+    height: 50,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-
-  cancelButton: {
     backgroundColor:
-      theme.colors.overlayLight,
+      theme.colors.surfaceSecondary,
     borderWidth: 1,
-    borderColor: theme.colors.borderLight,
+    borderColor: theme.colors.border,
   },
 
   cancelButtonText: {
     color: theme.colors.text,
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
   },
 
   saveButton: {
+    flex: 1.5,
+    height: 50,
+    borderRadius: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
     backgroundColor: theme.colors.primary,
+
+    shadowColor: theme.colors.primary,
+    shadowOffset: {
+      width: 0,
+      height: 5,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 9,
+    elevation: 4,
   },
 
   saveButtonText: {
-    color: theme.colors.background,
-    fontSize: 14,
-    fontWeight: '700',
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+
+  saveArrow: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    marginLeft: 8,
+    marginTop: -1,
   },
 })
 

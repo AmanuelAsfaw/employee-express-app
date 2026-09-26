@@ -10,11 +10,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Modal,
   SafeAreaView,
+  RefreshControl,
+  FlatList,
 } from 'react-native';
 
 import { Picker } from '@react-native-picker/picker';
@@ -34,6 +35,7 @@ import {
   saveServiceTypeOffline,
 } from '../../utils/bills/bills_hybrid_utils';
 import { theme } from '../../theme/theme';
+import { Alert } from '../../components/Alert';
 
 
 // ======================================================
@@ -1315,6 +1317,62 @@ const CreateBillScreen = () => {
 
   };
 
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refreshBillData = async () => {
+    if (!isConnected) {
+      Alert.alert(
+        'Offline',
+        'Cannot refresh data while offline.'
+      );
+      return;
+    }
+
+    try {
+      setRefreshing(true);
+
+      await fetchEmployeeBillsData_Hybrid(
+        true,
+        setSenders,
+        setConsignees,
+        setServiceTypes,
+        setBranchList,
+        txt => {
+          Alert.alert(
+            'Loading Error',
+            txt || 'Failed to refresh required data.'
+          );
+        }
+      );
+
+      const res = await api.get(
+        `${END_POINT}/usr-mngmnt/api/company-pricing/`
+      );
+
+      const configData = Array.isArray(res.data)
+        ? res.data[0]
+        : res.data;
+
+      if (configData) {
+        setCompanyPricingConfig(configData);
+      }
+
+    } catch (err) {
+      console.error(
+        'Refresh failed:',
+        err?.response?.data || err
+      );
+
+      Alert.alert(
+        'Refresh Failed',
+        extractApiError(err) || 'Failed to refresh data.'
+      );
+
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
 
   // ==================================================
   // RENDER
@@ -1346,12 +1404,19 @@ const CreateBillScreen = () => {
 
           <ScrollView
             style={styles.container}
-            contentContainerStyle={
-              styles.contentContainer
-            }
+            contentContainerStyle={styles.contentContainer}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={refreshBillData}
+                tintColor={COLORS.cyan}
+                colors={[COLORS.cyan]}
+              />
+            }
           >
+
 
             {/* =====================================
                 HEADER
@@ -2601,52 +2666,75 @@ const SearchSelector = ({
 }) => {
   const [isFocused, setIsFocused] = useState(false);
 
+  const showDropdown = isFocused;
+
   return (
     <View style={styles.searchSelector}>
+      {/* SEARCH INPUT */}
       <View style={styles.searchInputContainer}>
         <MaterialCommunityIcons
           name={value ? 'check-circle' : 'magnify'}
           size={20}
-          color={value ? theme.colors.success : theme.colors.cyan}
+          color={
+            value
+              ? theme.colors.success
+              : theme.colors.cyan
+          }
         />
 
         <TextInput
           style={styles.searchInput}
           placeholder={value || placeholder}
-          placeholderTextColor={value ? theme.colors.cyanLight : '#6f849b'}
+          placeholderTextColor={
+            value
+              ? theme.colors.cyanLight
+              : '#6f849b'
+          }
           value={search}
           onChangeText={setSearch}
           onFocus={() => setIsFocused(true)}
-          onBlur={() => setIsFocused(false)}
         />
 
         {value && !search && (
-          <MaterialCommunityIcons
-            name="check"
-            size={19}
-            color={theme.colors.success}
-          />
+          <TouchableOpacity
+            onPress={() => {
+              setSearch('');
+              setIsFocused(true);
+            }}
+          >
+            <MaterialCommunityIcons
+              name="check"
+              size={19}
+              color={theme.colors.success}
+            />
+          </TouchableOpacity>
         )}
       </View>
 
-      {isFocused && search.length >= 0 && (
+      {/* DROPDOWN */}
+      {showDropdown && (
         <View style={styles.dropdown}>
-          {/* Scrollable container with fixed/max height */}
-          <ScrollView
-            style={styles.dropdownScroll}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={true}
-          >
-            {options.length === 0 ? (
-              <Text style={styles.noResults}>No results found</Text>
-            ) : (
-              options.map((item) => (
+          {options.length === 0 ? (
+            <Text style={styles.noResults}>
+              No results found
+            </Text>
+          ) : (
+            <FlatList
+              data={options}
+              keyExtractor={(item, index) =>
+                String(
+                  item.id ||
+                  item.uuid ||
+                  index
+                )
+              }
+              renderItem={({ item }) => (
                 <TouchableOpacity
-                  key={item.id || item.uuid}
                   style={styles.dropdownItem}
-                  onPressIn={() => {
+                  activeOpacity={0.7}
+                  onPress={() => {
                     onSelect(item);
-                    // setIsFocused(false);
+                    setIsFocused(false);
                   }}
                 >
                   <View style={styles.dropdownIcon}>
@@ -2658,18 +2746,29 @@ const SearchSelector = ({
                   </View>
 
                   <View style={styles.dropdownInfo}>
-                    <Text style={styles.dropdownName}>{item.name}</Text>
-                    <Text style={styles.dropdownSub}>{displayItem(item)}</Text>
+                    <Text style={styles.dropdownName}>
+                      {item.name || ''}
+                    </Text>
+
+                    <Text style={styles.dropdownSub}>
+                      {displayItem(item)}
+                    </Text>
                   </View>
                 </TouchableOpacity>
-              ))
-            )}
-          </ScrollView>
+              )}
+              style={styles.dropdownList}
+              nestedScrollEnabled={true}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={true}
+              persistentScrollbar={true}
+            />
+          )}
         </View>
       )}
     </View>
   );
 };
+
 
 
 // ======================================================
@@ -3331,40 +3430,48 @@ const styles = StyleSheet.create({
   },
 
   dropdown: {
-    backgroundColor:
-      '#06213F',
+  backgroundColor: '#06213F',
 
-    borderRadius: 10,
+  borderRadius: 10,
 
-    marginTop: 4,
+  marginTop: 4,
 
-    borderWidth: 1,
+  borderWidth: 1,
 
-    borderColor:
-      COLORS.border,
+  borderColor: COLORS.border,
 
-    maxHeight: 220,
+  height: 220,
 
-    elevation: 10,
-    overflow: 'hidden',
-  },
+  elevation: 20,
 
-  dropdownItem: {
-    flexDirection: 'row',
+  zIndex: 9999,
 
-    alignItems: 'center',
+  overflow: 'hidden',
+},
 
-    padding: 11,
+dropdownList: {
+  flex: 1,
+},
 
-    borderBottomWidth: 1,
+dropdownItem: {
+  flexDirection: 'row',
 
-    borderBottomColor:
-      'rgba(255,255,255,0.05)',
+  alignItems: 'center',
+
+  padding: 11,
+
+  minHeight: 60,
+
+  borderBottomWidth: 1,
+
+  borderBottomColor:
+    'rgba(255,255,255,0.05)',
   },
 
   dropdownIcon: {
     width: 30,
     height: 30,
+
     borderRadius: 15,
 
     backgroundColor:
@@ -3376,26 +3483,36 @@ const styles = StyleSheet.create({
 
   dropdownInfo: {
     marginLeft: 9,
+
     flex: 1,
   },
 
   dropdownName: {
     color: '#fff',
+
     fontWeight: '600',
+
     fontSize: 13,
   },
 
   dropdownSub: {
     color: COLORS.cyanLight,
+
     fontSize: 11,
+
     marginTop: 2,
   },
 
   noResults: {
-    color: '#8c9db1',
-    padding: 15,
+    padding: 16,
+
     textAlign: 'center',
+
+    color: theme.colors.textSecondary,
+
+    fontSize: 14,
   },
+
 
 
   // -----------------------------------------------

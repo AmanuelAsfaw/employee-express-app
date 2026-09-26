@@ -1,8 +1,8 @@
 // src/utils/api_utils.js
 import api from "./axioServices.js";
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Alert } from 'react-native';
 import { CompanyId } from "../constants/companyInfo.js";
+import { Alert } from "../components/Alert.js";
 
 export const handleLoginAPI = async (
   e, // Note: In mobile call, pass null or { preventDefault: () => {} }
@@ -12,7 +12,8 @@ export const handleLoginAPI = async (
   username,
   password,
   setUser = null,
-  setUserToken
+  setUserToken,
+  setRole = null,
 ) => {
   if (e && e.preventDefault) e.preventDefault();
   setLoading(true);
@@ -49,6 +50,7 @@ export const handleLoginAPI = async (
     setUserToken(access);
 
     if (setUser) setUser(user);
+    if (setRole) setRole(user?.role);
 
     // Mobile Feedback (Replaces window.showToast)
     console.log(`Welcome back, ${user.username}!`);
@@ -102,7 +104,7 @@ export const handleLoginAPI = async (
   }
 };
 
-export const logoutAPI = async (setUserToken, setUser = null) => {
+export const logoutAPI = async (setUserToken, setUser = null, setRole = null) => {
   try {
     // Clear stored credentials
     await AsyncStorage.multiRemove([
@@ -113,7 +115,9 @@ export const logoutAPI = async (setUserToken, setUser = null) => {
     ]);
     
     if (setUserToken) setUserToken(null);
+
     if (setUser) setUser(null);
+    if (setRole) setRole(null);
   } catch (err) {
     console.error('Logout error:', err);
     Alert.alert('Error', 'Failed to log out properly.');

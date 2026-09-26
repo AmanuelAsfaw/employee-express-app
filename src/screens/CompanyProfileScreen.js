@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -18,6 +17,7 @@ import {
 import { theme } from '../theme/theme';
 import { END_POINT } from '../constants/urls';
 import { fetchCompanyAPI } from '../utils/employe_api_utils';
+import { Alert } from '../components/Alert';
 
 // Change this to your API configuration.
 // If you already have an api.js / axios instance, you can replace

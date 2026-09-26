@@ -3,23 +3,38 @@ import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import AppNavigator from './src/navigation/AppNavigator';
 import { StatusBar } from 'expo-status-bar';
+
+import AppNavigator from './src/navigation/AppNavigator';
+
+import {
+  AlertProvider,
+  AlertBridge,
+} from './src/components/Alert';
 
 export default function App() {
   const [isLoading, setIsLoading] = useState(true);
   const [userToken, setUserToken] = useState(null);
+  const [role, setRole] = useState(null);
 
   useEffect(() => {
-    // Check if user is already logged in when app starts
     const bootstrapAsync = async () => {
       let token;
+      let role;
+
       try {
-        token = await AsyncStorage.getItem('access_token');
+        token = await AsyncStorage.getItem(
+          'access_token'
+        );
+        role = await AsyncStorage.getItem(
+          'user_role'
+        );
       } catch (e) {
-        console.error("Failed to load token", e);
+        console.error('Failed to load token', e);
       }
+
       setUserToken(token);
+      setRole(role);
       setIsLoading(false);
     };
 
@@ -27,22 +42,36 @@ export default function App() {
   }, []);
 
   if (isLoading) {
-    // Show a loading spinner while checking storage
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#321fdb" />
+      <View
+        style={{
+          flex: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+        }}
+      >
+        <ActivityIndicator
+          size="large"
+          color="#321fdb"
+        />
       </View>
     );
   }
 
   return (
-    <NavigationContainer>
-      {/* 
-        Pass userToken to your Navigator or use it to define 
-        which Stack to show (AuthStack vs AppStack) 
-      */}
-      <AppNavigator userToken={userToken} setUserToken={setUserToken}/>
-      <StatusBar style="dark" />
-    </NavigationContainer>
+    <AlertProvider>
+      <AlertBridge />
+
+      <NavigationContainer>
+        <AppNavigator
+          role={role}
+          userToken={userToken}
+          setUserToken={setUserToken}
+          setRole={setRole}
+        />
+
+        <StatusBar style="light" />
+      </NavigationContainer>
+    </AlertProvider>
   );
 }

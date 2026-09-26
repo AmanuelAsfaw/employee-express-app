@@ -17,7 +17,7 @@ import { theme } from '../theme/theme.js';
 
 const ZPrimeFooter = () => {
   const openZealWebsite = async () => {
-    const url = 'https://zeal.com';
+    const url = 'https://zealtech.com';
 
     try {
       const supported = await Linking.canOpenURL(url);

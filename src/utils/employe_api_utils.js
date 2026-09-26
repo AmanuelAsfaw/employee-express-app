@@ -1,6 +1,7 @@
 // src/utils/employe_api_utils.js
+import { Alert } from "../components/Alert";
 import api from "./axioServices";
-import { Alert } from "react-native";
+// import { Alert } from "react-native";
 
 export const fetchEmployeeDashboardAPI = async (setStats, setRecentBills, setChartData, setLoading) => {
   try {
@@ -187,3 +188,41 @@ export const deleteConsigneeAPI = async (id) => {
 
   return res.data
 }
+
+export const sendSenderSmsBulkAPI = async (billIds) => {
+  return api.post(
+    `/express-api/api/bills/send_sender_sms_bulk/`,
+    {
+        bill_ids: billIds,
+    },
+    {
+        timeout: 10 * 60 * 1000, // 10 minutes
+    }
+
+  )
+}
+
+export const sendConsigneeSmsBulkAPI = async (billIds) => {
+  return api.post(
+    `/express-api/api/bills/send_consignee_sms_bulk/`,
+    {
+      bill_ids: billIds,
+    },
+    {
+        timeout: 10 * 60 * 1000, // 10 minutes
+    }
+  )
+}
+
+export const sendBothSmsBulkAPI = async (billIds) => {
+  return api.post(
+    `/express-api/api/bills/send_both_sms_bulk/`,
+    {
+      bill_ids: billIds,
+    },
+    {
+        timeout: 10 * 60 * 1000, // 10 minutes
+    }
+  )
+}
+

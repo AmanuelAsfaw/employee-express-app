@@ -730,9 +730,9 @@ const ReceivedBillsScreen = ({ navigation }) => {
         -------------------------------------------------- */}
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>
+            {/* <Text style={styles.headerTitle}>
               Received Bills
-            </Text>
+            </Text> */}
 
             <Text style={styles.headerSubtitle}>
               Manage and track incoming bills
@@ -1272,18 +1272,19 @@ const styles = StyleSheet.create({
   },
 
   summaryCard: {
-    width: 145,
-    minHeight: 132,
+    width: 105,
+    minHeight: 92,
     backgroundColor: theme.colors.surface,
     borderRadius: theme.radius.lg,
     borderWidth: 1,
-    padding: 13,
+    padding: 8,
     ...theme.shadows.card,
+    marginBottom: 0
   },
 
   summaryIcon: {
-    width: 38,
-    height: 38,
+    width: 24,
+    height: 24,
     borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1297,9 +1298,9 @@ const styles = StyleSheet.create({
   },
 
   summaryValue: {
-    fontSize: 20,
+    fontSize: 11,
     fontWeight: '800',
-    marginTop: 4,
+    marginTop: 0,
   },
 
   /* -------------------------------------------------------
